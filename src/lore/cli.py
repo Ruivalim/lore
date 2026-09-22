@@ -80,6 +80,45 @@ def cmd_add(args, repo: repo_mod.Repo) -> int:
     return 0
 
 
+def cmd_search(args, repo: repo_mod.Repo) -> int:
+    from .retrieve import IndexMissingError, search
+
+    try:
+        hits = search(repo, args.termos, args.limit, args.type or "", args.tag or "")
+    except IndexMissingError as exc:
+        return _err(str(exc), args.json)
+    except ValueError as exc:
+        return _err(str(exc), args.json)
+    if args.json:
+        _out({"ok": True, "hits": [hit.__dict__ for hit in hits]}, True)
+        return 0
+    if not hits:
+        print("nada encontrado")
+        return 0
+    for pos, hit in enumerate(hits, 1):
+        section = f"#{hit.heading}" if hit.heading else ""
+        why = ", ".join(hit.matched_in) or "?"
+        stale = " [stale]" if hit.status == "stale" else ""
+        print(f"{pos}. {hit.path}{section}{stale}")
+        print(f"   {hit.title} (via: {why})")
+        if hit.snippet:
+            print(f"   {hit.snippet}")
+    return 0
+
+
+def cmd_reindex(args, repo: repo_mod.Repo) -> int:
+    from .index import build
+
+    stats = build(repo)
+    _out(
+        {"ok": True,
+         "message": f"indexados {stats['docs']} docs, {stats['chunks']} trechos",
+         **stats},
+        args.json,
+    )
+    return 0
+
+
 def cmd_show(args, repo: repo_mod.Repo) -> int:
     doc = repo_mod.find_by_id(repo, args.id)
     if doc is None:
@@ -133,7 +172,7 @@ def run_doctor(repo: repo_mod.Repo) -> tuple[list[str], list[str]]:
     for doc in docs:
         if not doc.valid:
             continue
-        if not doc.front.get("sources"):
+        if not doc.front.get("sources") and doc.front.get("type") != "note":
             warnings.append(f"{doc.path}: sem sources")
         review_after = doc.front.get("review_after")
         if (
@@ -143,9 +182,10 @@ def run_doctor(repo: repo_mod.Repo) -> tuple[list[str], list[str]]:
         ):
             warnings.append(f"{doc.path}: vencido (review_after {review_after})")
 
-    index_path = os.path.join(repo.root, ".lore", "index.sqlite")
-    if not os.path.isfile(index_path):
-        warnings.append("índice ainda não existe (Fase 2: rode reindex)")
+    from .index import is_stale
+
+    if is_stale(repo):
+        warnings.append("índice ausente ou dessincronizado; rode: lore reindex")
     _ = cfg
     return problems, warnings
 
@@ -223,18 +263,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_show.add_argument("id")
     p_show.set_defaults(func=cmd_show)
 
-    sub.add_parser("search", help="buscar na base (Fase 2)").set_defaults(
-        func=lambda args, repo: _err("search chega na Fase 2", args.json)
-    )
+    p_search = sub.add_parser("search", help="buscar na base local")
+    p_search.add_argument("termos")
+    p_search.add_argument("--limit", type=int, default=10)
+    p_search.add_argument("--type", default="")
+    p_search.add_argument("--tag", default="")
+    p_search.set_defaults(func=cmd_search)
     sub.add_parser("ask", help="perguntar à base (Fase 3)").set_defaults(
         func=lambda args, repo: _err("ask chega na Fase 3", args.json)
     )
     sub.add_parser("review", help="fila de revisão (Fase 5)").set_defaults(
         func=lambda args, repo: _err("review chega na Fase 5", args.json)
     )
-    sub.add_parser("reindex", help="reconstruir índice (Fase 2)").set_defaults(
-        func=lambda args, repo: _err("reindex chega na Fase 2", args.json)
-    )
+    p_reindex = sub.add_parser("reindex", help="reconstruir índice")
+    p_reindex.set_defaults(func=cmd_reindex)
 
     p_doctor = sub.add_parser("doctor", help="diagnosticar repositório")
     p_doctor.set_defaults(func=cmd_doctor)
