@@ -80,14 +80,54 @@ def cmd_add(args, repo: repo_mod.Repo) -> int:
     return 0
 
 
+def _resolve_semantic(args, repo: repo_mod.Repo):
+    """Retorna (usar_semantico, embedder). Kill switch: --lexical ou config false."""
+    from . import config as config_mod
+
+    cfg, _ = config_mod.load(repo.root)
+    rcfg = cfg.get("retrieval", {})
+    use = bool(getattr(args, "semantic", False)) or bool(rcfg.get("semantic", False))
+    if getattr(args, "lexical", False):
+        use = False
+    if not use:
+        return False, None
+    from .semantic import EndpointEmbedder, HashEmbedder
+
+    if rcfg.get("embedding_backend") == "endpoint" and rcfg.get("embedding_endpoint"):
+        return True, EndpointEmbedder(
+            rcfg["embedding_endpoint"], rcfg.get("embedding_model", ""),
+            os.environ.get("LORE_API_KEY", ""))
+    return True, HashEmbedder()
+
+
+def _retrieval_weights(repo: repo_mod.Repo) -> tuple[float, float]:
+    from . import config as config_mod
+
+    cfg, _ = config_mod.load(repo.root)
+    rcfg = cfg.get("retrieval", {})
+    return (float(rcfg.get("lex_weight", 0.7)),
+            float(rcfg.get("sem_weight", 0.3)))
+
+
 def cmd_search(args, repo: repo_mod.Repo) -> int:
     from .retrieve import IndexMissingError, search
 
+    use_sem, embedder = _resolve_semantic(args, repo)
     try:
-        hits = search(repo, args.termos, args.limit, args.type or "", args.tag or "")
+        if use_sem:
+            from .retrieve import search_hybrid
+
+            lex_w, sem_w = _retrieval_weights(repo)
+            hits = search_hybrid(repo, args.termos, embedder, args.limit,
+                                 args.type or "", args.tag or "",
+                                 lex_w, sem_w)
+        else:
+            hits = search(repo, args.termos, args.limit, args.type or "", args.tag or "")
     except IndexMissingError as exc:
         return _err(str(exc), args.json)
     except ValueError as exc:
+        return _err(str(exc), args.json)
+    except RuntimeError as exc:
         return _err(str(exc), args.json)
     if args.json:
         _out({"ok": True, "hits": [hit.__dict__ for hit in hits]}, True)
@@ -110,12 +150,18 @@ def cmd_reindex(args, repo: repo_mod.Repo) -> int:
     from .index import build
 
     stats = build(repo)
-    _out(
-        {"ok": True,
-         "message": f"indexados {stats['docs']} docs, {stats['chunks']} trechos",
-         **stats},
-        args.json,
-    )
+    if getattr(args, "semantic", False):
+        from .semantic import HashEmbedder, build_vectors
+
+        _, embedder = _resolve_semantic(args, repo)
+        stats.update(build_vectors(repo, embedder or HashEmbedder()))
+        stats["message"] = (f"indexados {stats['docs']} docs, "
+                              f"{stats['chunks']} trechos, "
+                              f"{stats['vectors']} vetores")
+    else:
+        stats["message"] = (f"indexados {stats['docs']} docs, "
+                              f"{stats['chunks']} trechos")
+    _out({"ok": True, **stats}, args.json)
     return 0
 
 
@@ -136,6 +182,10 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
         repo, args.pergunta, doc_type=args.type or "", tag=args.tag or "",
         as_of=args.as_of or "", local_only=args.local_only,
         extractive=args.extractive,
+        semantic=_resolve_semantic(args, repo)[0],
+        embedder=_resolve_semantic(args, repo)[1],
+        lex_weight=_retrieval_weights(repo)[0],
+        sem_weight=_retrieval_weights(repo)[1],
     )
     if args.json:
         _out({"ok": True, "coverage": answer.coverage, "text": answer.text,
@@ -420,11 +470,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--as-of", default="")
     p_ask.add_argument("--yes", action="store_true")
     p_ask.set_defaults(func=cmd_ask)
+    p_reindex = sub.add_parser("reindex", help="reconstruir índice")
+    p_reindex.set_defaults(func=cmd_reindex)
+    for flag_holder in (p_search, p_ask, p_reindex):
+        flag_holder.add_argument("--semantic", action="store_true",
+                                 help="liga busca semântica (se vetores existirem)")
+        flag_holder.add_argument("--lexical", action="store_true",
+                                 help="força busca textual pura")
     p_review = sub.add_parser("review", help="fila de revisão ou detalhe")
     p_review.add_argument("id", nargs="?")
     p_review.set_defaults(func=cmd_review)
-    p_reindex = sub.add_parser("reindex", help="reconstruir índice")
-    p_reindex.set_defaults(func=cmd_reindex)
 
     p_doctor = sub.add_parser("doctor", help="diagnosticar repositório")
     p_doctor.set_defaults(func=cmd_doctor)

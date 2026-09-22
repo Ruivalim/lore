@@ -280,3 +280,16 @@ atualização curta do PLAN.md se algo desviou (motivo registrado).
 - Modelo local pesado: nunca obrigatório; extrativo é o modo padrão real.
 - Cada fase é reversível por `git revert` do merge da fase; índice sempre
   reconstruível; Markdown canônico nunca depende de ferramenta.
+
+## 8. Desvios registrados na implementação (v0.1.0)
+
+- Ranking textual usa score próprio (cobertura de termos por coluna com
+  saturação log), não BM25: BM25 punia a seção longa que casava mais
+  (medido no eval) e `offsets()` FTS5 falha neste SQLite; contagem via
+  `highlight()` por coluna.
+- MATCH usa OR entre termos (stopwords pt + len<3 removidos): AND recusava
+  pergunta real por causa de flexão/stopword.
+- `approve`/`reject`/`archive`/`stale` exigem `--human` no CLI.
+- `sources: []` só com `type: note`; doctor avisa sem sources nos demais.
+- Calibração Fase 6: backend hash com ganho zero, semântica off por padrão
+  (ver `docs/CALIBRATION.md`).

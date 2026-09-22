@@ -185,7 +185,8 @@ def validate_synthesis(response: str, citations: list[str]) -> list[str]:
 def ask(repo: repo_mod.Repo, question: str, limit: int = TOP_CHUNKS,
         doc_type: str = "", tag: str = "", as_of: str = "",
         local_only: bool = False, extractive: bool = True,
-        allow_yes: bool = False) -> Answer:
+        allow_yes: bool = False, semantic: bool = False, embedder=None,
+        lex_weight: float = 0.7, sem_weight: float = 0.3) -> Answer:
     """Pipeline ask: recupera, classifica, compõe. Sem rede por padrão."""
     terms = query_terms(question)
     if not terms:
@@ -193,8 +194,22 @@ def ask(repo: repo_mod.Repo, question: str, limit: int = TOP_CHUNKS,
             "A base não contém uma resposta confiável.\n"
             "(pergunta sem termos pesquisáveis)"
         ), gap=[])
+    sem_warning = ""
     try:
-        hits = LexicalScorer().search(repo, question, RETRIEVE_LIMIT, doc_type, tag)
+        if semantic:
+            from .retrieve import search_hybrid
+
+            try:
+                hits = search_hybrid(repo, question, embedder,
+                                     RETRIEVE_LIMIT, doc_type, tag,
+                                     lex_weight, sem_weight)
+            except RuntimeError as exc:
+                sem_warning = f"{exc}; usando busca textual"
+                hits = LexicalScorer().search(repo, question, RETRIEVE_LIMIT,
+                                              doc_type, tag)
+        else:
+            hits = LexicalScorer().search(repo, question, RETRIEVE_LIMIT,
+                                          doc_type, tag)
     except (ValueError, IndexMissingError) as exc:
         return Answer(coverage="insufficient", text=(
             f"A base não contém uma resposta confiável.\n({exc})"))
@@ -220,13 +235,18 @@ def ask(repo: repo_mod.Repo, question: str, limit: int = TOP_CHUNKS,
         answer.gap = gap
         answer.text = (
             f"Encontrei material parcial. Lacuna (sem cobertura): {', '.join(gap)}.\n"
-            "A resposta abaixo cobre só o que a base sustenta.\n\n" + answer.text
+            "A resposta abaixo cobre só o que a base sustenta.\n"
+            + (f"Aviso: {sem_warning}\n" if sem_warning else "")
+            + "\n" + answer.text
         )
         return answer
     warning = ""
+    if sem_warning:
+        warning = sem_warning
     if coverage == "stale":
-        warning = (f"melhor fonte é stale ({hits[0].path}); "
-                   "conteúdo pode estar desatualizado")
+        stale_note = (f"melhor fonte é stale ({hits[0].path}); "
+                       "conteúdo pode estar desatualizado")
+        warning = f"{warning}; {stale_note}" if warning else stale_note
     if not extractive:
         cfg, _ = config_mod.load(repo.root)
         endpoint = cfg.get("answer", {}).get("local_model_endpoint", "")

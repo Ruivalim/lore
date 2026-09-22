@@ -11,7 +11,8 @@ DEFAULTS: dict = {
         "drafts_dir": "drafts",
         "archive_dir": "archive",
     },
-    "retrieval": {"lexical": True, "semantic": False},
+    "retrieval": {"lexical": True, "semantic": False,
+                  "lex_weight": 0.7, "sem_weight": 0.3},
     "answer": {"mode": "local-first", "allow_extractive_fallback": True},
     "research": {"enabled": False, "require_confirmation": True},
     "privacy": {
@@ -30,7 +31,11 @@ archive_dir = "archive"
 [retrieval]
 lexical = true
 semantic = false
+# embedding_backend = "hash"  # hash | endpoint
+# embedding_endpoint = ""
 # embedding_model = ""
+lex_weight = 0.7
+sem_weight = 0.3
 
 [answer]
 mode = "local-first"

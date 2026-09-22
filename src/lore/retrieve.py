@@ -172,3 +172,71 @@ def _tag_match(conn: sqlite3.Connection, doc_id: str, tag: str) -> bool:
 def search(repo: repo_mod.Repo, query: str, limit: int = 10,
            doc_type: str = "", tag: str = "") -> list[Hit]:
     return LexicalScorer().search(repo, query, limit, doc_type, tag)
+
+
+def search_hybrid(repo: repo_mod.Repo, query: str, embedder,
+                  limit: int = 10, doc_type: str = "", tag: str = "",
+                  lex_weight: float = 0.7, sem_weight: float = 0.3) -> list[Hit]:
+    """Fusão textual + semântica com pesos calibrados (docs/CALIBRATION.md)."""
+    from .semantic import semantic_search
+
+    lexical = LexicalScorer().search(repo, query, 20, doc_type, tag)
+    semantic = semantic_search(repo, query, embedder, 20)
+    if not lexical:
+        return []
+    top = max(hit.score for hit in lexical)
+    bottom = min(hit.score for hit in lexical)
+    span = (top - bottom) or 1.0
+    combined: dict[tuple[str, str], list] = {}
+    for hit in lexical:
+        combined[(hit.doc_id, hit.heading)] = [
+            hit, lex_weight * (hit.score - bottom) / span, 0.0]
+    for sem in semantic:
+        key = (sem.doc_id, sem.heading)
+        if key in combined:
+            combined[key][2] = sem_weight * max(0.0, sem.score)
+        else:
+            hit = _hit_from_semantic(repo, sem, doc_type, tag)
+            if hit is not None:
+                combined[key] = [hit, 0.0, sem_weight * max(0.0, sem.score)]
+    ranked = sorted(combined.values(),
+                    key=lambda entry: entry[1] + entry[2], reverse=True)
+    hits = []
+    for hit, lex_score, sem_score in ranked[:limit]:
+        hit.score = lex_score + sem_score
+        if "semantic" not in hit.matched_in and sem_score > 0:
+            hit.matched_in = hit.matched_in + ["semantic"]
+        hits.append(hit)
+    return hits
+
+
+def _hit_from_semantic(repo: repo_mod.Repo, sem, doc_type: str, tag: str):
+    """Constrói Hit para achado só-semântico (sem par lexical)."""
+    import os
+    import sqlite3
+
+    from . import index as index_mod
+
+    conn = sqlite3.connect(index_mod.index_path_for(repo.root))
+    try:
+        meta = conn.execute(
+            "SELECT path, status, doc_type, title FROM docs WHERE doc_id = ?",
+            (sem.doc_id,)).fetchone()
+        if meta is None:
+            return None
+        doc_path, status, dtype, title = meta
+        if doc_type and dtype != doc_type:
+            return None
+        row = conn.execute(
+            "SELECT body FROM chunks WHERE doc_id = ? AND heading = ?"
+            " ORDER BY rowid LIMIT 1", (sem.doc_id, sem.heading)).fetchone()
+        if row is None:
+            return None
+    finally:
+        conn.close()
+    if not os.path.isfile(doc_path):
+        return None
+    snippet = (row[0] or "")[:300]
+    return Hit(doc_id=sem.doc_id, path=doc_path, title=title, status=status,
+                doc_type=dtype, heading=sem.heading, snippet=snippet,
+                score=0.0, matched_in=["semantic"])
