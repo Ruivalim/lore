@@ -140,3 +140,49 @@ def test_endpoint_embedder():
     finally:
         server.shutdown()
     assert vectors == [[1.0, 0.0], [0.0, 1.0]]
+
+
+def test_semantic_only_hit_passes_floor(repo, monkeypatch):
+    from lore.retrieve import search_hybrid
+    from lore.semantic import SemanticHit
+    import lore.semantic
+
+    build_vectors(repo, HashEmbedder())
+    canned = [SemanticHit(doc_id="restic-x99", heading="Procedimento", score=0.9)]
+    monkeypatch.setattr(lore.semantic, "semantic_search",
+                        lambda *a, **k: canned)
+    hits = search_hybrid(repo, "xyzabc nada", HashEmbedder(), limit=3)
+    assert hits and hits[0].doc_id == "restic-x99"
+    assert "semantic" in hits[0].matched_in
+
+
+def test_semantic_below_floor_excluded(repo, monkeypatch):
+    from lore.retrieve import search_hybrid
+    from lore.semantic import SemanticHit
+    import lore.semantic
+
+    build_vectors(repo, HashEmbedder())
+    canned = [SemanticHit(doc_id="restic-x99", heading="Procedimento", score=0.1)]
+    monkeypatch.setattr(lore.semantic, "semantic_search",
+                        lambda *a, **k: canned)
+    assert search_hybrid(repo, "xyzabc nada", HashEmbedder(), limit=3) == []
+
+
+def test_semantic_evidence_is_partial_not_insufficient(repo, monkeypatch):
+    import lore.retrieve
+    from lore.retrieve import Hit
+
+    hit = Hit(doc_id="restic-x99", path="p", title="Backup", status="verified",
+              doc_type="howto", heading="Procedimento", snippet="restic init",
+              score=1.0, matched_in=["semantic"])
+    monkeypatch.setattr(lore.retrieve, "LexicalScorer",
+                        lambda: _NoHits())
+    monkeypatch.setattr(lore.retrieve, "search_hybrid",
+                        lambda *a, **k: [hit])
+    answer = ask(repo, "xyzabc nada", semantic=True, embedder=HashEmbedder())
+    assert answer.coverage == "partial"
+
+
+class _NoHits:
+    def search(self, *a, **k):
+        return []

@@ -39,7 +39,8 @@ sem_weight = 0.3
 
 [answer]
 mode = "local-first"
-# local_model_endpoint = ""
+# local_model_endpoint = "http://localhost:11434/v1"
+# local_model = "qwen3:4b-instruct-2507-q4_K_M"
 allow_extractive_fallback = true
 
 [research]

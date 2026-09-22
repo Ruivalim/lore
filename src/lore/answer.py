@@ -50,6 +50,9 @@ def classify(hits: list[Hit], terms: list[str]) -> tuple[str, list[str]]:
                 covered.add(term)
     uncovered = [term for term in terms if term.lower() not in covered]
     if not covered:
+        # Evidência só-semântica: relevante, mas sem verificação termo a termo.
+        if any("semantic" in hit.matched_in for hit in hits[:3]):
+            return "partial", uncovered
         return "insufficient", uncovered
     if _detect_conflict(hits):
         return "conflicting", uncovered
@@ -135,7 +138,8 @@ def _full_chunk_text(repo: repo_mod.Repo, hit: Hit) -> str:
 
 
 def synthesize_local(endpoint: str, question: str,
-                     context: list[tuple[str, str]], api_key: str = "") -> str:
+                     context: list[tuple[str, str]], api_key: str = "",
+                     model: str = "local") -> str:
     """Chama endpoint OpenAI-compatible (stdlib). Levanta em falha."""
     blocks = "\n\n".join(
         f"[fonte: {citation}]\n{text}" for citation, text in context
@@ -147,7 +151,7 @@ def synthesize_local(endpoint: str, question: str,
         f"Pergunta: {question}\n\nTrechos:\n{blocks}\n"
     )
     payload = json.dumps({
-        "model": "local",
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
     }).encode()
@@ -249,13 +253,15 @@ def ask(repo: repo_mod.Repo, question: str, limit: int = TOP_CHUNKS,
         warning = f"{warning}; {stale_note}" if warning else stale_note
     if not extractive:
         cfg, _ = config_mod.load(repo.root)
-        endpoint = cfg.get("answer", {}).get("local_model_endpoint", "")
+        answer_cfg = cfg.get("answer", {})
+        endpoint = answer_cfg.get("local_model_endpoint", "")
         if endpoint:
             context = [(cite(hit), _full_chunk_text(repo, hit)) for hit in hits[:3]]
             try:
                 response = synthesize_local(
                     endpoint, question, context,
-                    os.environ.get("LORE_API_KEY", ""))
+                    os.environ.get("LORE_API_KEY", ""),
+                    answer_cfg.get("local_model", "local"))
             except Exception as exc:  # noqa: BLE001 - fallback é o contrato
                 warning = f"síntese local falhou ({exc}); usando modo extrativo"
             else:

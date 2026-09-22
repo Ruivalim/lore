@@ -34,3 +34,6 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# diretório de app estranho ao projeto (não versionar)
+data/

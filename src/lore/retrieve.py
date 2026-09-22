@@ -176,16 +176,18 @@ def search(repo: repo_mod.Repo, query: str, limit: int = 10,
 
 def search_hybrid(repo: repo_mod.Repo, query: str, embedder,
                   limit: int = 10, doc_type: str = "", tag: str = "",
-                  lex_weight: float = 0.7, sem_weight: float = 0.3) -> list[Hit]:
-    """Fusão textual + semântica com pesos calibrados (docs/CALIBRATION.md)."""
+                  lex_weight: float = 0.7, sem_weight: float = 0.3,
+                  sem_floor: float = 0.45) -> list[Hit]:
+    """Fusão textual + semântica com pesos calibrados (docs/CALIBRATION.md).
+
+    Achado só-semântico entra só acima de sem_floor: sem isso, query
+    lixo ganhava resposta de ruído."""
     from .semantic import semantic_search
 
     lexical = LexicalScorer().search(repo, query, 20, doc_type, tag)
     semantic = semantic_search(repo, query, embedder, 20)
-    if not lexical:
-        return []
-    top = max(hit.score for hit in lexical)
-    bottom = min(hit.score for hit in lexical)
+    top = max([hit.score for hit in lexical], default=0.0)
+    bottom = min([hit.score for hit in lexical], default=0.0)
     span = (top - bottom) or 1.0
     combined: dict[tuple[str, str], list] = {}
     for hit in lexical:
@@ -195,7 +197,7 @@ def search_hybrid(repo: repo_mod.Repo, query: str, embedder,
         key = (sem.doc_id, sem.heading)
         if key in combined:
             combined[key][2] = sem_weight * max(0.0, sem.score)
-        else:
+        elif sem.score >= sem_floor:
             hit = _hit_from_semantic(repo, sem, doc_type, tag)
             if hit is not None:
                 combined[key] = [hit, 0.0, sem_weight * max(0.0, sem.score)]
