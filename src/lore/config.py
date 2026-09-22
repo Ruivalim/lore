@@ -40,8 +40,11 @@ allow_extractive_fallback = true
 [research]
 enabled = false
 require_confirmation = true
-# provider = ""
-# web_search = ""
+# search_provider = "duckduckgo"
+# model_provider = "openai-compatible"
+# model_endpoint = "http://localhost:11434"
+# model_name = "local-model"
+# extra_patterns = []
 
 [privacy]
 redact_secrets = true

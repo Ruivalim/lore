@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from . import config as config_mod
 from . import index as index_mod
 from . import repo as repo_mod
-from .retrieve import Hit, LexicalScorer, query_terms
+from .retrieve import Hit, IndexMissingError, LexicalScorer, query_terms
 
 TOP_CHUNKS = 3
 RETRIEVE_LIMIT = 10
@@ -195,7 +195,7 @@ def ask(repo: repo_mod.Repo, question: str, limit: int = TOP_CHUNKS,
         ), gap=[])
     try:
         hits = LexicalScorer().search(repo, question, RETRIEVE_LIMIT, doc_type, tag)
-    except ValueError as exc:
+    except (ValueError, IndexMissingError) as exc:
         return Answer(coverage="insufficient", text=(
             f"A base não contém uma resposta confiável.\n({exc})"))
     if as_of:
@@ -204,9 +204,7 @@ def ask(repo: repo_mod.Repo, question: str, limit: int = TOP_CHUNKS,
     if coverage == "insufficient":
         return Answer(coverage=coverage, gap=gap, text=(
             "A base não contém uma resposta confiável.\n"
-            + ("Pesquisa externa ainda não implementada (Fase 4)."
-               if not local_only else "")
-        ).strip() + "\n")
+        ))
     if coverage == "conflicting":
         lines = ["As fontes locais discordam; sem conclusão segura:", ""]
         for hit in hits[:4]:

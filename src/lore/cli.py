@@ -127,9 +127,9 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
 
         cfg, _ = config_mod.load(repo.root)
         research = cfg.get("research", {})
-        if not research.get("enabled") or not research.get("provider"):
+        if not research.get("enabled") or not research.get("model_endpoint"):
             return _err("--yes exige pesquisa configurada "
-                        "(research.enabled + provider)", args.json)
+                        "(research.enabled + model_endpoint)", args.json)
     if args.as_of and not re.match(r"^\d{4}-\d{2}-\d{2}$", args.as_of):
         return _err("--as-of exige data YYYY-MM-DD", args.json)
     answer = run_ask(
@@ -143,6 +143,56 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
               "warning": answer.warning}, True)
         return 0
     sys.stdout.write(answer.text)
+    if (
+        answer.coverage in ("insufficient", "partial")
+        and not args.local_only
+    ):
+        return _maybe_research(args, repo, args.pergunta, answer)
+    return 0
+
+
+def _maybe_research(args, repo: repo_mod.Repo, question: str, answer) -> int:
+    from . import config as config_mod
+    from .research import MODELS, WEB_SEARCHES, research
+
+    cfg, _ = config_mod.load(repo.root)
+    rcfg = cfg.get("research", {})
+    if not rcfg.get("enabled"):
+        return 0
+    endpoint = rcfg.get("model_endpoint", "")
+    if not endpoint:
+        print("pesquisa habilitada mas sem model_endpoint; pergunta preservada.")
+        return 0
+    confirmed = args.yes
+    if not confirmed and rcfg.get("require_confirmation", True):
+        try:
+            reply = input(
+                "Pesquisar externamente e criar um rascunho? [S/n] ").strip().lower()
+        except EOFError:
+            reply = "n"
+        confirmed = reply in ("", "s", "y")
+    if not confirmed:
+        return 0
+    # Envio remoto explícito: só pergunta + trechos necessários.
+    local_context = "\n".join(answer.citations[:3])
+    web_cls = WEB_SEARCHES.get(rcfg.get("search_provider", "duckduckgo"),
+                               WEB_SEARCHES["duckduckgo"])
+    model_cls = MODELS.get(rcfg.get("model_provider", "openai-compatible"),
+                           MODELS["openai-compatible"])
+    model = model_cls(endpoint, rcfg.get("model_name", "lore-remote"),
+                      os.environ.get("LORE_REMOTE_API_KEY", ""))
+    result = research(repo, question, local_context, web=web_cls(), model=model,
+                      extra_patterns=rcfg.get("extra_patterns", []))
+    if result.blocked:
+        print(f"bloqueado: {result.blocked}")
+        return 1
+    if not result.ok:
+        print(result.error)
+        return 1
+    print()
+    print(result.answer)
+    for item in result.discarded:
+        print(f"descartada: {item}")
     return 0
 
 
