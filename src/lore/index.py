@@ -124,6 +124,7 @@ def _create(conn: sqlite3.Connection) -> None:
             doc_type TEXT NOT NULL,
             title TEXT NOT NULL,
             tags TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT '',
             hash TEXT NOT NULL
         );
         CREATE VIRTUAL TABLE chunks USING fts5(
@@ -175,10 +176,12 @@ def build(repo: repo_mod.Repo) -> dict:
                 doc.status, str(front.get("type", "")), doc.body,
             )
             conn.execute(
-                "INSERT INTO docs (doc_id, path, status, doc_type, title, tags, hash)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO docs (doc_id, path, status, doc_type, title, tags,"
+                " updated_at, hash)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (doc.id, doc.path, doc.status, str(front.get("type", "")),
                  title, " ".join(tag.lower() for tag in tags),
+                 str(front.get("updated_at", "")),
                  file_hash(doc.path)),
             )
             for chunk in chunks:

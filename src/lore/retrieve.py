@@ -56,16 +56,18 @@ STOPWORDS = frozenset(
 )
 
 
+def query_terms(query: str) -> list[str]:
+    """Termos significativos da pergunta (sem stopwords, len>=3)."""
+    tokens = re.findall(r"[\w]+", query, flags=re.UNICODE)
+    return [tok for tok in tokens if len(tok) >= 3 and tok.lower() not in STOPWORDS]
+
+
 def sanitize_query(query: str) -> str:
     """Normaliza entrada para MATCH FTS5: termos citados com OR.
 
     OR + BM25 ranqueia por cobertura em vez de exigir tudo (AND
     recusava pergunta real por causa de stopword ou flexão)."""
-    tokens = re.findall(r"[\w]+", query, flags=re.UNICODE)
-    kept = [
-        tok for tok in tokens
-        if len(tok) >= 3 and tok.lower() not in STOPWORDS
-    ]
+    kept = query_terms(query)
     if not kept:
         raise ValueError("consulta vazia")
     return " OR ".join(f'"{tok}"' for tok in kept)

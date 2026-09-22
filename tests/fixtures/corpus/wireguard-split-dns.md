@@ -25,8 +25,8 @@ Quando o túnel deve resolver só domínios internos.
 
 ## Procedimento
 
-Use uma rota de DNS por domínio no perfil do túnel e confirme que o
-resolved recebeu a interface correta.
+Para configurar, use uma rota de DNS por domínio no perfil do túnel
+e confirme que o resolved recebeu a interface correta.
 
 ```ini
 [Interface]

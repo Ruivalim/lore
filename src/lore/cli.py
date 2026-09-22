@@ -119,6 +119,33 @@ def cmd_reindex(args, repo: repo_mod.Repo) -> int:
     return 0
 
 
+def cmd_ask(args, repo: repo_mod.Repo) -> int:
+    from .answer import ask as run_ask
+
+    if args.yes:
+        from . import config as config_mod
+
+        cfg, _ = config_mod.load(repo.root)
+        research = cfg.get("research", {})
+        if not research.get("enabled") or not research.get("provider"):
+            return _err("--yes exige pesquisa configurada "
+                        "(research.enabled + provider)", args.json)
+    if args.as_of and not re.match(r"^\d{4}-\d{2}-\d{2}$", args.as_of):
+        return _err("--as-of exige data YYYY-MM-DD", args.json)
+    answer = run_ask(
+        repo, args.pergunta, doc_type=args.type or "", tag=args.tag or "",
+        as_of=args.as_of or "", local_only=args.local_only,
+        extractive=args.extractive,
+    )
+    if args.json:
+        _out({"ok": True, "coverage": answer.coverage, "text": answer.text,
+              "citations": answer.citations, "gap": answer.gap,
+              "warning": answer.warning}, True)
+        return 0
+    sys.stdout.write(answer.text)
+    return 0
+
+
 def cmd_show(args, repo: repo_mod.Repo) -> int:
     doc = repo_mod.find_by_id(repo, args.id)
     if doc is None:
@@ -269,9 +296,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--type", default="")
     p_search.add_argument("--tag", default="")
     p_search.set_defaults(func=cmd_search)
-    sub.add_parser("ask", help="perguntar à base (Fase 3)").set_defaults(
-        func=lambda args, repo: _err("ask chega na Fase 3", args.json)
-    )
+    p_ask = sub.add_parser("ask", help="perguntar à base local")
+    p_ask.add_argument("pergunta")
+    p_ask.add_argument("--local-only", action="store_true")
+    p_ask.add_argument("--extractive", action="store_true",
+                       help="não usa modelo para síntese")
+    p_ask.add_argument("--type", default="")
+    p_ask.add_argument("--tag", default="")
+    p_ask.add_argument("--as-of", default="")
+    p_ask.add_argument("--yes", action="store_true")
+    p_ask.set_defaults(func=cmd_ask)
     sub.add_parser("review", help="fila de revisão (Fase 5)").set_defaults(
         func=lambda args, repo: _err("review chega na Fase 5", args.json)
     )
