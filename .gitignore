@@ -1,0 +1,36 @@
+# lore: artefatos locais, nunca versionar (README §9: Git guarda história, não o índice)
+
+# índice local descartável e reconstruível
+.lore/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# credenciais e segredos (README §12.4: fora do repo)
+.env
+.env.*
+*.key
+*.pem
+credentials*.json
+secrets*.toml
+
+# logs e caches
+*.log
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# SO e editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
