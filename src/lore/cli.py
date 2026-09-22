@@ -196,6 +196,70 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer) -> int:
     return 0
 
 
+def cmd_review(args, repo: repo_mod.Repo) -> int:
+    from . import review as review_mod
+
+    if not args.id:
+        items = review_mod.queue(repo)
+        if args.json:
+            _out({"ok": True, "queue": [
+                {"id": doc_id, "path": path, "reason": reason}
+                for doc_id, path, reason in items]}, True)
+            return 0
+        if not items:
+            print("fila vazia")
+            return 0
+        for doc_id, path, reason in items:
+            print(f"- {doc_id} ({reason}): {path}")
+        return 0
+    try:
+        info = review_mod.detail(repo, args.id)
+    except KeyError as exc:
+        return _err(str(exc), args.json)
+    if args.json:
+        _out({"ok": True, **info}, True)
+        return 0
+    print(f"id: {info['id']}\nlocal: {info['path']}")
+    print(f"status: {info['front'].get('status')}  "
+          f"tipo: {info['front'].get('type')}")
+    print("fontes:")
+    for src in info["front"].get("sources", []):
+        print(f"  - {src}")
+    if info["unsourced_claims"]:
+        print("alegações sem fonte:")
+        for claim in info["unsourced_claims"]:
+            print(f"  ! {claim}")
+    if info["possible_conflicts"]:
+        print("possíveis conflitos:")
+        for item in info["possible_conflicts"]:
+            print(f"  ? {item}")
+    if info["diff"]:
+        print("diff contra versão anterior:")
+        print(info["diff"])
+    print()
+    with open(info["path"], encoding="utf-8") as handle:
+        sys.stdout.write(handle.read())
+    return 0
+
+
+def _state_change(args, repo, action: str) -> int:
+    from . import review as review_mod
+
+    funcs = {
+        "approve": lambda: review_mod.approve(repo, args.id, args.human),
+        "reject": lambda: review_mod.reject(repo, args.id, args.reason or "",
+                                              args.human),
+        "archive": lambda: review_mod.archive(repo, args.id, args.human),
+        "stale": lambda: review_mod.mark_stale(repo, args.id, args.human),
+    }
+    try:
+        dest = funcs[action]()
+    except (KeyError, ValueError, RuntimeError) as exc:
+        return _err(str(exc), args.json)
+    _out({"ok": True, "message": dest, "path": dest}, args.json)
+    return 0
+
+
 def cmd_show(args, repo: repo_mod.Repo) -> int:
     doc = repo_mod.find_by_id(repo, args.id)
     if doc is None:
@@ -356,9 +420,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--as-of", default="")
     p_ask.add_argument("--yes", action="store_true")
     p_ask.set_defaults(func=cmd_ask)
-    sub.add_parser("review", help="fila de revisão (Fase 5)").set_defaults(
-        func=lambda args, repo: _err("review chega na Fase 5", args.json)
-    )
+    p_review = sub.add_parser("review", help="fila de revisão ou detalhe")
+    p_review.add_argument("id", nargs="?")
+    p_review.set_defaults(func=cmd_review)
     p_reindex = sub.add_parser("reindex", help="reconstruir índice")
     p_reindex.set_defaults(func=cmd_reindex)
 
@@ -370,9 +434,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_config.set_defaults(func=cmd_config)
 
     for name in ("approve", "reject", "archive", "stale"):
-        sub.add_parser(name, help=f"{name} (Fase 5)").set_defaults(
-            func=lambda args, repo, _n=name: _err(f"{_n} chega na Fase 5", args.json)
-        )
+        p_state = sub.add_parser(name, help=f"{name} um documento")
+        p_state.add_argument("id")
+        p_state.add_argument("--human", action="store_true",
+                             help="aprovação humana explícita")
+        p_state.add_argument("--reason", default="",
+                             help="motivo (obrigatório em reject)")
+        p_state.set_defaults(
+            func=lambda args, repo, _n=name: _state_change(args, repo, _n))
     return parser
 
 
