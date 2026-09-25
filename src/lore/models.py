@@ -137,6 +137,9 @@ def validate(front: dict, body: str = "") -> list[str]:
                 if entry.get("kind") == "personal":
                     if not entry.get("description"):
                         errors.append("source personal exige description")
+                elif entry.get("kind") == "local":
+                    if not entry.get("path") or not entry.get("description"):
+                        errors.append("source local exige path e description")
                 elif not entry.get("url"):
                     errors.append("source externa exige url")
                 if entry.get("url") and not isinstance(entry["url"], str):

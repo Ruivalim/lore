@@ -35,6 +35,7 @@ class Answer:
     citations: list[str] = field(default_factory=list)
     gap: list[str] = field(default_factory=list)
     warning: str = ""
+    context: list[tuple[str, str]] = field(default_factory=list)
 
 
 def classify(hits: list[Hit], terms: list[str]) -> tuple[str, list[str]]:
@@ -84,7 +85,9 @@ def _detect_conflict(hits: list[Hit]) -> bool:
 
 
 def _shared_terms(first: str, second: str) -> set[str]:
-    words = lambda text: {word for word in re.findall(r"[\w]+", text) if len(word) >= 4}
+    def words(text: str) -> set[str]:
+        return {word for word in re.findall(r"[\w]+", text) if len(word) >= 4}
+
     return words(first) & words(second) - {
         "para", "como", "esta", "este", "isso", "entre", "sobre", "quando",
     }
@@ -139,7 +142,8 @@ def _full_chunk_text(repo: repo_mod.Repo, hit: Hit) -> str:
 
 def synthesize_local(endpoint: str, question: str,
                      context: list[tuple[str, str]], api_key: str = "",
-                     model: str = "local") -> str:
+                     model: str = "local", backend: str = "openai-compatible",
+                     pi_binary: str = "pi", pi_model: str = "") -> str:
     """Chama endpoint OpenAI-compatible (stdlib). Levanta em falha."""
     blocks = "\n\n".join(
         f"[fonte: {citation}]\n{text}" for citation, text in context
@@ -150,6 +154,12 @@ def synthesize_local(endpoint: str, question: str,
         "Não invente comandos nem valores.\n\n"
         f"Pergunta: {question}\n\nTrechos:\n{blocks}\n"
     )
+    if backend == "pi-cli":
+        from .pi_cli import complete
+
+        return complete(prompt, binary=pi_binary, model=pi_model)
+    if backend != "openai-compatible":
+        raise ValueError(f"backend de síntese desconhecido: {backend}")
     payload = json.dumps({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -237,6 +247,9 @@ def ask(repo: repo_mod.Repo, question: str, limit: int = TOP_CHUNKS,
         answer = compose_extractive(hits)
         answer.coverage = "partial"
         answer.gap = gap
+        answer.context = [
+            (cite(hit), _full_chunk_text(repo, hit)) for hit in hits[:TOP_CHUNKS]
+        ]
         answer.text = (
             f"Encontrei material parcial. Lacuna (sem cobertura): {', '.join(gap)}.\n"
             "A resposta abaixo cobre só o que a base sustenta.\n"
@@ -254,14 +267,22 @@ def ask(repo: repo_mod.Repo, question: str, limit: int = TOP_CHUNKS,
     if not extractive:
         cfg, _ = config_mod.load(repo.root)
         answer_cfg = cfg.get("answer", {})
+        pi_cfg = cfg.get("pi", {})
         endpoint = answer_cfg.get("local_model_endpoint", "")
-        if endpoint:
+        backend = answer_cfg.get(
+            "backend", "openai-compatible" if endpoint else "pi-cli")
+        if backend == "pi-cli" or (backend == "openai-compatible" and endpoint):
             context = [(cite(hit), _full_chunk_text(repo, hit)) for hit in hits[:3]]
             try:
                 response = synthesize_local(
                     endpoint, question, context,
                     os.environ.get("LORE_API_KEY", ""),
-                    answer_cfg.get("local_model", "local"))
+                    answer_cfg.get("local_model", "local"),
+                backend=backend,
+                pi_binary=answer_cfg.get(
+                    "pi_binary", pi_cfg.get("binary", "pi")),
+                pi_model=answer_cfg.get(
+                    "pi_model", pi_cfg.get("model", "")))
             except Exception as exc:  # noqa: BLE001 - fallback é o contrato
                 warning = f"síntese local falhou ({exc}); usando modo extrativo"
             else:

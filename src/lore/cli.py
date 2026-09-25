@@ -80,6 +80,30 @@ def cmd_add(args, repo: repo_mod.Repo) -> int:
     return 0
 
 
+def cmd_import(args, repo: repo_mod.Repo) -> int:
+    from .importer import import_markdown
+
+    cfg, errors = config_mod.load(repo.root)
+    if errors:
+        return _err("; ".join(errors), args.json)
+    try:
+        result = import_markdown(repo, args.arquivo, cfg)
+    except (TypeError, ValueError, FileNotFoundError, OSError, RuntimeError) as exc:
+        return _err(str(exc), args.json)
+    payload = {
+        "ok": True,
+        "id": result.doc_id,
+        "title": result.title,
+        "type": result.doc_type,
+        "tags": result.tags,
+        "status": "draft",
+        "path": result.path,
+        "message": f"importado como draft: {result.path}",
+    }
+    _out(payload, args.json)
+    return 0
+
+
 def _resolve_semantic(args, repo: repo_mod.Repo):
     """Retorna (usar_semantico, embedder). Kill switch: --lexical ou config false."""
     from . import config as config_mod
@@ -173,9 +197,11 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
 
         cfg, _ = config_mod.load(repo.root)
         research = cfg.get("research", {})
-        if not research.get("enabled") or not research.get("model_endpoint"):
-            return _err("--yes exige pesquisa configurada "
-                        "(research.enabled + model_endpoint)", args.json)
+        provider = research.get("model_provider", "pi-cli")
+        if (not research.get("enabled")
+                or provider not in ("pi-cli", "openai-compatible")
+                or (provider == "openai-compatible" and not research.get("model_endpoint"))):
+            return _err("--yes exige pesquisa habilitada e backend de modelo configurado", args.json)
     if args.as_of and not re.match(r"^\d{4}-\d{2}-\d{2}$", args.as_of):
         return _err("--as-of exige data YYYY-MM-DD", args.json)
     answer = run_ask(
@@ -187,34 +213,63 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
         lex_weight=_retrieval_weights(repo)[0],
         sem_weight=_retrieval_weights(repo)[1],
     )
-    if args.json:
-        _out({"ok": True, "coverage": answer.coverage, "text": answer.text,
-              "citations": answer.citations, "gap": answer.gap,
-              "warning": answer.warning}, True)
-        return 0
-    sys.stdout.write(answer.text)
+    payload = {
+        "ok": True,
+        "coverage": answer.coverage,
+        "text": answer.text,
+        "citations": answer.citations,
+        "gap": answer.gap,
+        "warning": answer.warning,
+        "researched": False,
+        "research": None,
+    }
+    if not args.json:
+        sys.stdout.write(answer.text)
     if (
         answer.coverage in ("insufficient", "partial")
         and not args.local_only
     ):
-        return _maybe_research(args, repo, args.pergunta, answer)
+        code, research_payload, researched = _maybe_research(
+            args, repo, args.pergunta, answer
+        )
+        payload["ok"] = code == 0
+        payload["researched"] = researched
+        payload["research"] = research_payload
+        if args.json:
+            _out(payload, True)
+        return code
+    if args.json:
+        _out(payload, True)
     return 0
 
 
-def _maybe_research(args, repo: repo_mod.Repo, question: str, answer) -> int:
-    from . import config as config_mod
-    from .research import MODELS, WEB_SEARCHES, research
+def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
+    from .research import (
+        OpenAICompatibleModel,
+        PiCLIModel,
+        WEB_SEARCHES,
+        research,
+    )
 
     cfg, _ = config_mod.load(repo.root)
     rcfg = cfg.get("research", {})
     if not rcfg.get("enabled"):
-        return 0
+        return 0, None, False
     endpoint = rcfg.get("model_endpoint", "")
-    if not endpoint:
-        print("pesquisa habilitada mas sem model_endpoint; pergunta preservada.")
-        return 0
-    confirmed = args.yes
-    if not confirmed and rcfg.get("require_confirmation", True):
+    provider = rcfg.get("model_provider", "pi-cli")
+    pi_cfg = cfg.get("pi", {})
+    if provider == "openai-compatible" and not endpoint:
+        message = "pesquisa habilitada mas sem model_endpoint; pergunta preservada."
+        if not args.json:
+            print(message)
+        return 1, {"ok": False, "error": message}, False
+    if provider not in ("pi-cli", "openai-compatible"):
+        message = f"backend de pesquisa desconhecido ({provider}); pergunta preservada."
+        if not args.json:
+            print(message)
+        return 1, {"ok": False, "error": message}, False
+    confirmed = args.yes or not rcfg.get("require_confirmation", True)
+    if not confirmed:
         try:
             reply = input(
                 "Pesquisar externamente e criar um rascunho? [S/n] ").strip().lower()
@@ -222,28 +277,49 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer) -> int:
             reply = "n"
         confirmed = reply in ("", "s", "y")
     if not confirmed:
-        return 0
-    # Envio remoto explícito: só pergunta + trechos necessários.
-    local_context = "\n".join(answer.citations[:3])
+        return 0, None, False
+    local_context = "\n\n".join(
+        f"[fonte local: {citation}]\n{text}"
+        for citation, text in answer.context[:3]
+    )
     web_cls = WEB_SEARCHES.get(rcfg.get("search_provider", "duckduckgo"),
                                WEB_SEARCHES["duckduckgo"])
-    model_cls = MODELS.get(rcfg.get("model_provider", "openai-compatible"),
-                           MODELS["openai-compatible"])
-    model = model_cls(endpoint, rcfg.get("model_name", "lore-remote"),
-                      os.environ.get("LORE_REMOTE_API_KEY", ""))
+    if provider == "pi-cli":
+        model = PiCLIModel(
+            model=rcfg.get("pi_model", pi_cfg.get("model", "")),
+            binary=rcfg.get("pi_binary", pi_cfg.get("binary", "pi")),
+        )
+    else:
+        model = OpenAICompatibleModel(
+            endpoint,
+            rcfg.get("model_name", "lore-remote"),
+            os.environ.get("LORE_REMOTE_API_KEY", ""),
+        )
     result = research(repo, question, local_context, web=web_cls(), model=model,
                       extra_patterns=rcfg.get("extra_patterns", []))
+    result_payload = {
+        "ok": result.ok,
+        "answer": result.answer,
+        "draft_path": result.draft_path,
+        "sources": [source.__dict__ for source in result.sources],
+        "blocked": result.blocked,
+        "error": result.error,
+        "discarded": result.discarded,
+    }
     if result.blocked:
-        print(f"bloqueado: {result.blocked}")
-        return 1
+        if not args.json:
+            print(f"bloqueado: {result.blocked}")
+        return 1, result_payload, True
     if not result.ok:
-        print(result.error)
-        return 1
-    print()
-    print(result.answer)
-    for item in result.discarded:
-        print(f"descartada: {item}")
-    return 0
+        if not args.json:
+            print(result.error)
+        return 1, result_payload, True
+    if not args.json:
+        print()
+        print(result.answer)
+        for item in result.discarded:
+            print(f"descartada: {item}")
+    return 0, result_payload, True
 
 
 def cmd_review(args, repo: repo_mod.Repo) -> int:
@@ -274,7 +350,10 @@ def cmd_review(args, repo: repo_mod.Repo) -> int:
           f"tipo: {info['front'].get('type')}")
     print("fontes:")
     for src in info["front"].get("sources", []):
-        print(f"  - {src}")
+        if isinstance(src, dict) and src.get("kind") == "local":
+            print(f"  - arquivo local: {src.get('path', '?')} ({src.get('description', '')})")
+        else:
+            print(f"  - {src}")
     if info["unsourced_claims"]:
         print("alegações sem fonte:")
         for claim in info["unsourced_claims"]:
@@ -289,6 +368,17 @@ def cmd_review(args, repo: repo_mod.Repo) -> int:
     print()
     with open(info["path"], encoding="utf-8") as handle:
         sys.stdout.write(handle.read())
+    return 0
+
+
+def cmd_edit(args, repo: repo_mod.Repo) -> int:
+    from . import review as review_mod
+
+    try:
+        path = review_mod.edit(repo, args.id)
+    except (KeyError, ValueError, RuntimeError, OSError) as exc:
+        return _err(str(exc), args.json)
+    _out({"ok": True, "message": f"documento editado: {path}", "path": path}, args.json)
     return 0
 
 
@@ -405,7 +495,7 @@ def cmd_doctor(args, repo: repo_mod.Repo) -> int:
 def cmd_config(args, repo: repo_mod.Repo) -> int:
     if args.init:
         try:
-            path = config_mod.init(repo.root)
+            path = config_mod.init_global() if args.global_config else config_mod.init(repo.root)
         except FileExistsError as exc:
             return _err(str(exc), args.json)
         _out({"ok": True, "message": path, "path": path}, args.json)
@@ -450,6 +540,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_add.add_argument("--move", action="store_true")
     p_add.set_defaults(func=cmd_add)
 
+    p_import = sub.add_parser("import", help="importar Markdown com metadados sugeridos pelo Pi")
+    p_import.add_argument("arquivo")
+    p_import.set_defaults(func=cmd_import)
+
     p_show = sub.add_parser("show", help="exibir documento por id")
     p_show.add_argument("id")
     p_show.set_defaults(func=cmd_show)
@@ -481,11 +575,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_review.add_argument("id", nargs="?")
     p_review.set_defaults(func=cmd_review)
 
+    p_edit = sub.add_parser("edit", help="editar documento com $EDITOR")
+    p_edit.add_argument("id")
+    p_edit.set_defaults(func=cmd_edit)
+
     p_doctor = sub.add_parser("doctor", help="diagnosticar repositório")
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_config = sub.add_parser("config", help="ver ou iniciar configuração")
     p_config.add_argument("--init", action="store_true")
+    p_config.add_argument("--global", dest="global_config", action="store_true",
+                          help="usar ~/.config/lore/config.yaml")
     p_config.set_defaults(func=cmd_config)
 
     for name in ("approve", "reject", "archive", "stale"):
@@ -503,7 +603,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    root = os.path.abspath(args.root) if args.root else repo_mod.find_root()
+    try:
+        root = repo_mod.resolve_root(
+            explicit=args.root,
+            configured=config_mod.global_repository_root(),
+        )
+    except ValueError as exc:
+        if args.command == "config" and args.global_config and args.init:
+            root = os.path.abspath(args.root or os.getcwd())
+        else:
+            return _err(str(exc), args.json)
     repo = repo_mod.Repo(root)
     return args.func(args, repo)
 

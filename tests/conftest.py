@@ -1,8 +1,12 @@
 """Fixture: repo lore temporário com docs válidos e inválidos."""
 
-import os
-
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolate_user_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
 
 VALID_HOWTO = """\
 ---
@@ -77,13 +81,11 @@ def lore_repo(tmp_path):
     (tmp_path / "knowledge" / "wireguard-split-dns.md").write_text(
         VALID_HOWTO, encoding="utf-8"
     )
-    (tmp_path / "drafts" / "ideia-backup.md").write_text(
-        VALID_NOTE, encoding="utf-8"
-    )
+    (tmp_path / "drafts" / "ideia-backup.md").write_text(VALID_NOTE, encoding="utf-8")
     (tmp_path / "drafts" / "sem-id.md").write_text(INVALID_NO_ID, encoding="utf-8")
     (tmp_path / ".lore").mkdir()
     (tmp_path / ".lore" / "config.toml").write_text(
-        '[privacy]\nauto_commit = false\n', encoding="utf-8"
+        "[privacy]\nauto_commit = false\n", encoding="utf-8"
     )
     return str(tmp_path)
 

@@ -2,7 +2,38 @@
 
 > Uma biblioteca pessoal curada, consultável por linguagem natural, que aprende com as perguntas que ainda não consegue responder.
 
-Status: especificação aprovada para planejamento. Ainda não há implementação.
+Status: implementação funcional em desenvolvimento. O núcleo documental, busca local, respostas fundamentadas, pesquisa externa com rascunhos, revisão humana e busca semântica opcional estão implementados. Consulte `PLAN.md` para decisões e desvios registrados.
+
+## Começar
+
+```sh
+make install
+lore config --global --init
+lore import arquivo.md
+lore review
+```
+
+`make install` instala Lore editável no PATH do usuário via pipx. A configuração global fica em `~/.config/lore/config.yaml`; `repository.root` aponta para o acervo usado fora dele e `pi.model` escolhe o modelo Pi no formato `provider/model-id`, vazio usa o default do Pi. A raiz segue esta precedência: `--root`, repositório Lore ancestral do diretório atual, `repository.root` global. Config TOML em `.lore/config.toml` pode sobrescrever opções operacionais, mas não troca a raiz global.
+
+Exemplo:
+
+```yaml
+repository:
+  root: /caminho/para/lore
+pi:
+  binary: pi
+  model: provider/model-id
+```
+
+`lore import` usa Pi para classificar título, tipo e tags, preserva corpo original e salva em `drafts/`. Segredos detectados bloqueiam envio ao modelo. `lore add` continua disponível para importar documentos que já têm front matter Lore válido. Respostas usam `pi --print` sem sessão, ferramentas ou recursos de projeto. Embeddings semânticos continuam configurados separadamente.
+
+Pesquisa externa exige configuração e confirmação; `--yes` pula confirmação, mas não os bloqueios de privacidade. Promoção e outras mudanças de estado exigem `--human`.
+
+Para desenvolver e testar:
+
+```sh
+python -m pytest -q
+```
 
 ## 1. Visão
 
@@ -291,7 +322,14 @@ sources:
     description: Verificado no homelab em 2026-09-21
 ```
 
-O sistema não deve inventar URL para preencher metadados.
+O sistema não deve inventar URL para preencher metadados. `lore import` registra arquivo de origem local sem tratá-lo como fonte web:
+
+```yaml
+sources:
+  - kind: local
+    path: guia.md
+    description: Markdown importado, conteúdo preservado.
+```
 
 ## 9. Organização prevista do repositório
 
@@ -499,10 +537,12 @@ lore ask "pergunta"
 lore search "termos"
 lore show <id>
 lore add <arquivo.md>
+lore import <arquivo.md>
 lore new --type <tipo>
 lore review
 lore review <id>
-lore approve <id>
+lore edit <id>
+lore approve <id> --human
 lore reject <id>
 lore archive <id>
 lore stale <id>
@@ -525,7 +565,7 @@ Opções previstas:
 --yes              aceita fallback externo sem prompt interativo
 ```
 
-`--yes` só deverá funcionar quando política de privacidade e provedor estiverem configurados.
+`--yes` só funciona quando política de privacidade e provedor estão configurados. Com `--json`, o fallback externo também roda e retorna `researched` mais `research`, contendo resposta, caminho do rascunho, fontes, descartes e eventual erro ou bloqueio. Todo conteúdo pesquisado continua como `draft` até `lore approve <id> --human`.
 
 ### 13.2 `lore search`
 

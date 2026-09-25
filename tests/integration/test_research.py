@@ -1,8 +1,8 @@
 """Fase 4: pesquisa externa, rascunho, segurança (§18.3)."""
 
-import json
 import os
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -10,10 +10,12 @@ import pytest
 from lore import repo as repo_mod
 from lore.models import parse_doc
 from lore.research import (
-    ResearchResult,
+    PiCLIModel,
     RemoteModel,
+    ResearchResult,
     Source,
     WebSearch,
+    _SafeRedirectHandler,
     fetch_page,
     parse_ddg_html,
     research,
@@ -62,6 +64,19 @@ def repo(tmp_path, monkeypatch):
     os.makedirs(os.path.join(root, ".lore"))
     monkeypatch.setattr("lore.research.fetch_page", PAGES.__getitem__)
     return repo_mod.Repo(root)
+
+
+def test_pi_cli_research_model_uses_pi_adapter(monkeypatch):
+    calls = []
+
+    def fake_complete(prompt, *, binary, model):
+        calls.append((prompt, binary, model))
+        return "Resposta provisória."
+
+    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
+    result = PiCLIModel(model="openai/example", binary="/usr/bin/pi").complete("dados")
+    assert result == "Resposta provisória."
+    assert calls == [("dados", "/usr/bin/pi", "openai/example")]
 
 
 def test_research_creates_valid_draft(repo):
@@ -126,6 +141,21 @@ def test_malicious_page_cannot_change_policy(repo, tmp_path):
         assert parse_doc(handle.read()).status == "draft"
 
 
+def test_repeated_research_creates_distinct_ids(repo):
+    model = StubModel("RESPOSTA repetida.")
+    first = research(repo, "mensagens dos últimos commits", "", web=StubWeb([]), model=model)
+    second = research(repo, "mensagens dos últimos commits", "", web=StubWeb([]), model=model)
+
+    assert first.ok and second.ok
+    with open(first.draft_path, encoding="utf-8") as handle:
+        first_doc = parse_doc(handle.read())
+    with open(second.draft_path, encoding="utf-8") as handle:
+        second_doc = parse_doc(handle.read())
+    assert first_doc.id == "mensagens-dos-ltimos-commits"
+    assert second_doc.id == "mensagens-dos-ltimos-commits-2"
+    assert first_doc.id != second_doc.id
+
+
 def test_inconclusive_creates_draft_saying_so(repo):
     model = StubModel("Não sei; fontes fracas.")
     result = research(repo, "pergunta obscura", "", web=StubWeb([]), model=model)
@@ -171,7 +201,20 @@ class _Big(BaseHTTPRequestHandler):
         pass
 
 
-def test_fetch_page_truncates():
+def test_fetch_page_blocks_loopback():
+    with pytest.raises(ValueError, match="não público"):
+        fetch_page("http://127.0.0.1:8000/secret")
+
+
+def test_redirect_handler_blocks_private_destination():
+    handler = _SafeRedirectHandler()
+    request = urllib.request.Request("https://example.org/start")
+    with pytest.raises(ValueError, match="não público"):
+        handler.redirect_request(request, None, 302, "Found", {}, "http://127.0.0.1/admin")
+
+
+def test_fetch_page_truncates(monkeypatch):
+    monkeypatch.setattr("lore.research._validate_public_http_url", lambda url: None)
     server = HTTPServer(("127.0.0.1", 0), _Big)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -180,6 +223,112 @@ def test_fetch_page_truncates():
     finally:
         server.shutdown()
     assert len(text.encode()) <= 50_000 + 100
+
+
+def test_cli_research_uses_pi_cli_without_endpoint(repo, monkeypatch, capsys):
+    from lore.cli import main
+
+    with open(os.path.join(repo.root, ".lore", "config.toml"), "w",
+              encoding="utf-8") as handle:
+        handle.write('[research]\nenabled = true\nmodel_provider = "pi-cli"\n')
+    monkeypatch.setattr("lore.research.DuckDuckGoWebSearch.search", lambda *a, **k: [])
+    calls = []
+
+    def fake_complete(prompt, *, binary, model):
+        calls.append((prompt, binary, model))
+        return "Pesquisa inconclusiva, sem fonte aproveitável."
+
+    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
+    assert main(["--root", repo.root, "ask", "pergunta desconhecida", "--yes"]) == 0
+    assert calls and "Passagens web:" in calls[0][0]
+    assert calls[0][1:] == ("pi", "")
+    assert "não verificada" in capsys.readouterr().out
+
+
+def test_cli_research_without_confirmation_runs_automatically(
+    repo, monkeypatch, capsys
+):
+    from lore.cli import main
+
+    with open(os.path.join(repo.root, ".lore", "config.toml"), "w",
+              encoding="utf-8") as handle:
+        handle.write(
+            '[research]\nenabled = true\nrequire_confirmation = false\n'
+            'model_provider = "pi-cli"\n'
+        )
+    monkeypatch.setattr("lore.research.DuckDuckGoWebSearch.search", lambda *a, **k: [])
+    calls = []
+
+    def fake_complete(prompt, *, binary, model):
+        calls.append(prompt)
+        return "Resposta automática provisória."
+
+    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
+    assert main(["--root", repo.root, "ask", "mensagens dos ultimos commits"]) == 0
+    assert calls
+    assert "não verificada" in capsys.readouterr().out
+
+
+def test_cli_partial_research_sends_local_chunk(repo, monkeypatch, capsys):
+    from lore import index as index_mod
+    from lore.cli import main
+
+    verified = (
+        "---\nid: git-log-local\ntitle: Histórico Git\ntype: howto\nstatus: verified\n"
+        "tags:\n  - git\ncreated_at: 2026-01-01\nupdated_at: 2026-01-01\n"
+        "verified_at: 2026-01-01\nsources:\n  - kind: personal\n"
+        "    description: verificado localmente\n---\n\n# Histórico Git\n\n"
+        "## Mensagens\n\nUse `git log --oneline` para ver mensagens dos commits.\n"
+    )
+    with open(os.path.join(repo.root, "knowledge", "git-log.md"), "w",
+              encoding="utf-8") as handle:
+        handle.write(verified)
+    with open(os.path.join(repo.root, ".lore", "config.toml"), "w",
+              encoding="utf-8") as handle:
+        handle.write('[research]\nenabled = true\nmodel_provider = "pi-cli"\n')
+    index_mod.build(repo)
+    monkeypatch.setattr("lore.research.DuckDuckGoWebSearch.search", lambda *a, **k: [])
+    prompts = []
+
+    def fake_complete(prompt, *, binary, model):
+        prompts.append(prompt)
+        return "Resposta provisória sobre assinatura dos commits."
+
+    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
+    assert main([
+        "--root", repo.root, "ask", "mensagens e assinatura dos commits", "--yes"
+    ]) == 0
+    assert prompts
+    assert "git log --oneline" in prompts[0]
+    assert "git-log.md#Mensagens" in prompts[0]
+    capsys.readouterr()
+
+
+def test_cli_json_yes_runs_research_and_returns_draft(repo, monkeypatch, capsys):
+    import json
+
+    from lore.cli import main
+
+    with open(os.path.join(repo.root, ".lore", "config.toml"), "w",
+              encoding="utf-8") as handle:
+        handle.write('[research]\nenabled = true\nmodel_provider = "pi-cli"\n')
+    monkeypatch.setattr("lore.research.DuckDuckGoWebSearch.search", lambda *a, **k: [])
+    monkeypatch.setattr(
+        "lore.pi_cli.complete",
+        lambda *a, **k: "Use `git log --format=%s` para ver mensagens.",
+    )
+
+    assert main([
+        "--root", repo.root, "ask",
+        "Como eu vejo as mensagens dos ultimos commits?", "--yes", "--json",
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["coverage"] == "insufficient"
+    assert payload["researched"] is True
+    assert payload["research"]["ok"] is True
+    assert payload["research"]["draft_path"].endswith(".md")
+    assert os.path.isfile(payload["research"]["draft_path"])
+    assert "git log" in payload["research"]["answer"]
 
 
 def test_cli_decline_keeps_local_only(repo, monkeypatch, capsys):

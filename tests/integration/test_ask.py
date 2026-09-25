@@ -55,6 +55,9 @@ def test_partial_names_gap(repo):
     assert answer.coverage == "partial"
     assert "openvpn" in answer.gap
     assert answer.citations
+    assert answer.context
+    assert answer.context[0][0] in answer.citations
+    assert "WireGuard" in answer.context[0][1]
 
 
 def test_stale_warns(repo):
@@ -176,6 +179,24 @@ def test_synthesis_falls_back_on_bad_citation(repo, fake_llm):
     answer = ask(repo, "split DNS WireGuard", extractive=False)
     assert "Fontes locais:" in answer.text
     assert "extrativo" in answer.text
+
+
+def test_synthesis_uses_pi_cli_backend(repo, monkeypatch):
+    citation = f"{repo.root}/knowledge/wireguard-split-dns.md#Procedimento"
+    cfg = os.path.join(repo.root, ".lore", "config.toml")
+    with open(cfg, "a", encoding="utf-8") as handle:
+        handle.write('\n[answer]\nbackend = "pi-cli"\n')
+    calls = []
+
+    def fake_complete(prompt, *, binary, model):
+        calls.append((prompt, binary, model))
+        return f"Use DNS por domínio [{citation}]."
+
+    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
+    answer = ask(repo, "split DNS WireGuard", extractive=False)
+    assert "Use DNS por domínio" in answer.text
+    assert calls and "Trechos:" in calls[0][0]
+    assert calls[0][1:] == ("pi", "")
 
 
 def test_synthesis_falls_back_when_endpoint_down(repo):

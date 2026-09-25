@@ -10,7 +10,7 @@ Nenhum código escrito antes do aceite deste plano (README §22).
 | Linguagem | Python >= 3.11 | Stdlib cobre sqlite3+FTS5, argparse, tomllib. Deps pequenas, testes locais simples. |
 | Biblioteca de CLI | argparse (stdlib) | Superfície pequena (12 comandos). Zero dependência, sem lockfile na Fase 1. |
 | Representação de embeddings | Nenhuma até a Fase 6 | Retrieval terá interface (`Scorer`) onde o lexical é um scorer. Semântico entra como segundo scorer, aditivo. |
-| Modelo local padrão | Nenhum fixo; endpoint OpenAI-compatible configurável | Princípio 9: provedores substituíveis. Ausente vira modo extrativo. |
+| Backend de texto | CLI do Pi em modo print, sem sessão nem ferramentas; modelo padrão do Pi, com override por provider/model | Reusa login e providers configurados no Pi. Sem CLI/modelo disponível, resposta extrativa permanece. |
 | Provedores remotos iniciais | Nenhum fixo; interface + config, implementação na Fase 4 | Evita amarrar acervo a fornecedor. |
 | Busca web | Interface `WebSearch` + provedor configurável, Fase 4 | Mesmo motivo acima. |
 | Fusão e reordenação | Fase 2: FTS5 + boosts por campo. Fusão híbrida só na Fase 6 | Calibrar com consultas reais antes de fundir (README §10.4). |
@@ -228,7 +228,8 @@ semantic = false        # Fase 6
 
 [answer]
 mode = "local-first"
-# local_model_endpoint = ""  # OpenAI-compatible; vazio = extrativo
+backend = "pi-cli"  # pi-cli ou openai-compatible; usa modelo padrão do Pi
+# local_model_endpoint = ""  # compatibilidade; usado no backend openai-compatible
 allow_extractive_fallback = true
 
 [research]
@@ -293,3 +294,11 @@ atualização curta do PLAN.md se algo desviou (motivo registrado).
 - `sources: []` só com `type: note`; doctor avisa sem sources nos demais.
 - Calibração Fase 6: backend hash com ganho zero, semântica off por padrão
   (ver `docs/CALIBRATION.md`).
+- Revisão de completude: `lore edit <id>` expõe no CLI o fluxo `$EDITOR` que já existia no módulo de revisão.
+- Geração de texto usa Pi CLI (`--print`) sem sessão, ferramentas ou contexto de projeto; embeddings continuam no endpoint configurado.
+- `lore import` usa Pi só para metadados; corpo fica preservado e novo arquivo sempre nasce draft. Origem local é registrada como `sources.kind: local`.
+- Config global em `~/.config/lore/config.yaml` define `repository.root`, `pi.binary` e `pi.model`; raiz resolve por `--root`, ancestral do diretório atual e então config global. TOML do repo sobrescreve opções operacionais, nunca a raiz.
+- Fallback externo respeita `require_confirmation = false`, funciona em `--json`, envia trechos locais na cobertura parcial e cria IDs exclusivos para pesquisas repetidas.
+- O ciclo CLI completo de pesquisa, draft, aprovação humana e reutilização local vive em `tests/integration/test_learning_cycle.py`.
+- `make install` usa pipx em modo editável para expor `lore` no PATH do usuário.
+- Segurança: pesquisa aceita somente HTTP(S) com resolução pública; bloqueia destinos privados e redirects para rede local para reduzir SSRF.

@@ -7,7 +7,10 @@ name = "lore"
 version = "0.0.1"
 description = "Biblioteca pessoal curada, consultável por linguagem natural"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.14"]
 
 [project.scripts]
 lore = "lore.cli:main"
@@ -17,3 +20,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

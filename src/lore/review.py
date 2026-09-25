@@ -9,7 +9,6 @@ from __future__ import annotations
 import datetime
 import difflib
 import os
-import re
 import subprocess
 
 from . import index as index_mod

@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import datetime
 import html
+import ipaddress
 import json
-import os
 import re
+import socket
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -105,6 +106,20 @@ class RemoteModel:
         raise NotImplementedError
 
 
+class PiCLIModel(RemoteModel):
+    name = "pi-cli"
+
+    def __init__(self, endpoint: str = "", model: str = "",
+                 api_key: str = "", binary: str = "pi"):
+        self.model = model
+        self.binary = binary
+
+    def complete(self, prompt: str) -> str:
+        from .pi_cli import complete
+
+        return complete(prompt, binary=self.binary, model=self.model)
+
+
 class OpenAICompatibleModel(RemoteModel):
     name = "openai-compatible"
 
@@ -134,6 +149,7 @@ WEB_SEARCHES: dict[str, type[WebSearch]] = {
     "duckduckgo": DuckDuckGoWebSearch,
 }
 MODELS: dict[str, type[RemoteModel]] = {
+    "pi-cli": PiCLIModel,
     "openai-compatible": OpenAICompatibleModel,
 }
 
@@ -142,11 +158,44 @@ def _today() -> str:
     return datetime.date.today().isoformat()
 
 
+def _validate_public_http_url(url: str) -> None:
+    """Bloqueia esquemas e destinos locais para evitar SSRF na pesquisa web."""
+    parsed = urllib.parse.urlsplit(url)
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if parsed.scheme not in ("http", "https") or not host or parsed.username or parsed.password:
+        raise ValueError("URL bloqueada: somente HTTP(S) público é permitido")
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        raise ValueError("URL bloqueada: host local não permitido")
+    try:
+        addresses = {ipaddress.ip_address(host)}
+    except ValueError:
+        try:
+            addresses = {
+                ipaddress.ip_address(info[4][0])
+                for info in socket.getaddrinfo(
+                    host, parsed.port or (443 if parsed.scheme == "https" else 80),
+                    type=socket.SOCK_STREAM,
+                )
+            }
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"URL bloqueada: host não resolvido ({host})") from exc
+    if not addresses or any(not address.is_global for address in addresses):
+        raise ValueError(f"URL bloqueada: destino não público ({host})")
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_public_http_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def fetch_page(url: str) -> str:
-    """Baixa página como texto, truncada. Levanta em falha de rede."""
+    """Baixa página truncada; bloqueia destinos internos."""
+    _validate_public_http_url(url)
     request = urllib.request.Request(
         url, headers={"User-Agent": "lore-research/0.1"}, method="GET")
-    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+    opener = urllib.request.build_opener(_SafeRedirectHandler())
+    with opener.open(request, timeout=TIMEOUT) as response:
         raw = response.read(MAX_PAGE_BYTES + 1)
     text = raw[:MAX_PAGE_BYTES].decode("utf-8", "replace")
     text = re.sub(r"<script.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
@@ -269,18 +318,24 @@ def research(repo: repo_mod.Repo, question: str, local_context: str = "",
             "resposta do modelo continha padrão de instruction; descartada. "
             "Pergunta preservada."), sources=[s for s in passages], discarded=discarded)
     front, body = build_draft(question, response, passages)
+    base_id = front["id"]
+    counter = 1
+    while repo_mod.find_by_id(repo, front["id"]) is not None:
+        counter += 1
+        front["id"] = f"{base_id[:72]}-{counter}"
     errors = validate(front, body)
     if errors:
         return ResearchResult(ok=False, error=(
             f"rascunho gerado inválido ({'; '.join(errors)}). Nada foi salvo."),
             sources=passages, discarded=discarded)
-    dest = repo_mod._safe_join(repo.root, repo_mod.DRAFTS, front["id"] + ".md")
-    counter = 2
-    while os.path.exists(dest):
-        dest = repo_mod._safe_join(
-            repo.root, repo_mod.DRAFTS, f"{front['id']}-{counter}.md")
-        counter += 1
-    repo_mod.save_atomic(dest, repo_mod.render_doc(front, body))
+    while True:
+        dest = repo_mod._safe_join(repo.root, repo_mod.DRAFTS, front["id"] + ".md")
+        try:
+            repo_mod.save_atomic_new(dest, repo_mod.render_doc(front, body))
+            break
+        except FileExistsError:
+            counter += 1
+            front["id"] = f"{base_id[:72]}-{counter}"
     answer = (
         "Resposta externa, ainda não verificada.\n"
         f"Rascunho salvo em:\n  {dest}\n\n{response.strip()}\n"

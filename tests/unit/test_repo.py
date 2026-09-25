@@ -5,7 +5,45 @@ import os
 import pytest
 
 from lore import repo as repo_mod
-from lore.models import parse_doc
+
+
+def test_discover_root_walks_up_and_returns_none_outside_repo(tmp_path, monkeypatch):
+    root = tmp_path / "library"
+    nested = root / "notes" / "deep"
+    (root / "knowledge").mkdir(parents=True)
+    nested.mkdir(parents=True)
+
+    assert repo_mod.discover_root(str(nested)) == str(root)
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    assert repo_mod.discover_root() is None
+
+
+def test_resolve_root_precedence_and_validation(tmp_path):
+    explicit = tmp_path / "explicit"
+    discovered = tmp_path / "discovered"
+    configured = tmp_path / "configured"
+    for root in (explicit, discovered, configured):
+        (root / "knowledge").mkdir(parents=True)
+    nested = discovered / "nested"
+    nested.mkdir()
+
+    assert repo_mod.resolve_root(
+        explicit=str(explicit), start=str(nested), configured=str(configured)
+    ) == str(explicit)
+    assert repo_mod.resolve_root(start=str(nested), configured=str(configured)) == str(
+        discovered
+    )
+    assert repo_mod.resolve_root(start=str(tmp_path), configured=str(configured)) == str(
+        configured
+    )
+
+    with pytest.raises(ValueError, match="repositório Lore"):
+        repo_mod.resolve_root(start=str(tmp_path), configured=str(tmp_path / "missing"))
+    with pytest.raises(ValueError, match="nenhum repositório Lore"):
+        repo_mod.resolve_root(start=str(tmp_path))
 
 
 def test_load_all_and_find(lore_repo):
@@ -38,6 +76,15 @@ def test_save_atomic_no_partial(tmp_path):
         assert handle.read() == "conteúdo\n"
     leftovers = [name for name in os.listdir(tmp_path) if name.endswith(".tmp")]
     assert leftovers == []
+
+
+def test_save_atomic_new_never_overwrites(tmp_path):
+    target = str(tmp_path / "doc.md")
+    repo_mod.save_atomic_new(target, "primeiro\n")
+    with pytest.raises(FileExistsError):
+        repo_mod.save_atomic_new(target, "segundo\n")
+    assert (tmp_path / "doc.md").read_text(encoding="utf-8") == "primeiro\n"
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_check_path_blocks_traversal(empty_repo):

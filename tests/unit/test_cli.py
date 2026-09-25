@@ -5,7 +5,6 @@ import os
 import subprocess
 import sys
 
-import pytest
 
 from lore.cli import main
 
@@ -86,6 +85,30 @@ def test_config_init_and_show(tmp_path, capsys):
     assert run_cli(root, "config", "--json") == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["config"]["privacy"]["auto_commit"] is False
+
+
+def test_main_uses_global_repository_outside_tree(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "library"
+    (repo / "knowledge").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    config_home = tmp_path / "config"
+    global_path = config_home / "lore" / "config.yaml"
+    global_path.parent.mkdir(parents=True)
+    global_path.write_text(f'repository:\n  root: "{repo}"\n', encoding="utf-8")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.chdir(outside)
+
+    assert main(["doctor"]) == 0
+    assert "ok" in capsys.readouterr().out
+
+
+def test_main_reports_missing_repository(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["doctor"]) == 1
+    assert "nenhum repositório Lore" in capsys.readouterr().err
 
 
 def test_installed_binary_runs():

@@ -1,6 +1,5 @@
 """Fase 5: revisão, promoção e ciclo completo de aprendizado (§20)."""
 
-import json
 import os
 import shutil
 
@@ -95,6 +94,12 @@ def test_edit_failure_reported(repo, monkeypatch):
     monkeypatch.setenv("EDITOR", "false")
     with pytest.raises(RuntimeError):
         review_mod.edit(repo, "novo-guia")
+
+
+def test_cli_edit(repo, monkeypatch, capsys):
+    monkeypatch.setenv("EDITOR", "true")
+    assert run_cli(repo.root, "edit", "novo-guia") == 0
+    assert "documento editado" in capsys.readouterr().out
 
 
 def test_cli_review_queue_and_approve(repo, capsys):

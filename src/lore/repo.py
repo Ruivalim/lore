@@ -24,18 +24,50 @@ class Repo:
         return os.path.join(self.root, name)
 
 
-def find_root(start: str = "") -> str:
-    """Sobe até achar raiz lore (dir com knowledge/ ou .lore/). Senão, cwd."""
+def is_repo_root(path: str) -> bool:
+    """Confirma marcador de repositório Lore sem criar nada."""
+    return os.path.isdir(path) and (
+        os.path.isdir(os.path.join(path, KNOWLEDGE))
+        or os.path.isdir(os.path.join(path, ".lore"))
+    )
+
+
+def discover_root(start: str = "") -> str | None:
+    """Sobe a partir de start até achar repositório Lore."""
     current = os.path.abspath(start or os.getcwd())
     while True:
-        if os.path.isdir(os.path.join(current, KNOWLEDGE)) or os.path.isdir(
-            os.path.join(current, ".lore")
-        ):
+        if is_repo_root(current):
             return current
         parent = os.path.dirname(current)
         if parent == current:
-            return os.getcwd()
+            return None
         current = parent
+
+
+def resolve_root(explicit: str = "", start: str = "", configured: str = "") -> str:
+    """Resolve raiz: opção explícita, ancestral do cwd, configuração global."""
+    if explicit:
+        root = os.path.abspath(os.path.expanduser(explicit))
+        if not is_repo_root(root):
+            raise ValueError(f"não é um repositório Lore: {root}")
+        return root
+    discovered = discover_root(start)
+    if discovered:
+        return discovered
+    if configured:
+        root = os.path.abspath(os.path.expanduser(configured))
+        if not is_repo_root(root):
+            raise ValueError(f"não é um repositório Lore: {root}")
+        return root
+    raise ValueError(
+        "nenhum repositório Lore encontrado; use --root ou configure "
+        "repository.root em ~/.config/lore/config.yaml"
+    )
+
+
+def find_root(start: str = "") -> str:
+    """Compatibilidade: descobre raiz ou preserva antigo fallback para cwd."""
+    return discover_root(start) or os.path.abspath(start or os.getcwd())
 
 
 def _safe_join(root: str, *parts: str) -> str:
@@ -122,6 +154,26 @@ def save_atomic(path: str, text: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def save_atomic_new(path: str, text: str) -> None:
+    """Cria arquivo completo sem sobrescrever destino surgido em corrida."""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(tmp, path)
+        os.unlink(tmp)
     except BaseException:
         try:
             os.unlink(tmp)
