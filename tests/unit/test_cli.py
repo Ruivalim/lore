@@ -84,7 +84,8 @@ def test_config_init_and_show(tmp_path, capsys):
     capsys.readouterr()
     assert run_cli(root, "config", "--json") == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["config"]["privacy"]["auto_commit"] is False
+    assert payload["config"]["git"]["auto_commit"] is False
+    assert "auto_commit" not in payload["config"]["privacy"]
 
 
 def test_main_uses_global_repository_outside_tree(tmp_path, monkeypatch, capsys):

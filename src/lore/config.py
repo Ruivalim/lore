@@ -25,8 +25,8 @@ DEFAULTS: dict = {
     "privacy": {
         "redact_secrets": True,
         "send_full_documents": False,
-        "auto_commit": False,
     },
+    "git": {"auto_commit": False},
     "pi": {"binary": "pi", "model": ""},
 }
 
@@ -68,6 +68,10 @@ pi_binary = "pi"
 [privacy]
 redact_secrets = true
 send_full_documents = false
+
+[git]
+# Commit automático dos paths que cada comando tocou + push oportunista.
+# Nunca faz pull/rebase/force push; reconciliação fica no script lore-sync.
 auto_commit = false
 """
 

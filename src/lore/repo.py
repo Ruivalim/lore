@@ -7,6 +7,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 
+from . import gitops
 from .models import Doc, parse_doc
 
 KNOWLEDGE = "knowledge"
@@ -154,6 +155,7 @@ def save_atomic(path: str, text: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
+        gitops.touch(path)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -174,6 +176,7 @@ def save_atomic_new(path: str, text: str) -> None:
             os.fsync(handle.fileno())
         os.link(tmp, path)
         os.unlink(tmp)
+        gitops.touch(path)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -232,6 +235,8 @@ def add_file(
         raise ValueError(f"destino já existe: {dest}")
     if move:
         shutil.move(src, dest)
+        gitops.touch(src)  # origem sumiu (só se estava dentro da raiz)
     else:
         shutil.copy2(src, dest)
+    gitops.touch(dest)
     return dest

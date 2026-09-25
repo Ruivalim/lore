@@ -12,6 +12,7 @@ import os
 import subprocess
 
 from . import index as index_mod
+from . import gitops
 from . import repo as repo_mod
 from .models import parse_doc, transition
 
@@ -117,6 +118,8 @@ def _move(doc_path: str, dest_dir: str) -> str:
     if os.path.exists(dest):
         raise ValueError(f"destino já existe: {dest}")
     os.rename(doc_path, dest)
+    gitops.touch(doc_path)  # origem removida
+    gitops.touch(dest)      # destino criado
     return dest
 
 
@@ -207,9 +210,15 @@ def edit(repo: repo_mod.Repo, doc_id: str) -> str:
     if doc is None:
         raise KeyError(f"id não encontrado: {doc_id}")
     editor = os.environ.get("EDITOR", "vi")
+    with open(doc.path, "rb") as handle:
+        before = handle.read()
     result = subprocess.run([editor, doc.path])
     if result.returncode != 0:
         raise RuntimeError(f"editor saiu com código {result.returncode}")
+    with open(doc.path, "rb") as handle:
+        after = handle.read()
+    if after != before:
+        gitops.touch(doc.path)
     with open(doc.path, encoding="utf-8") as handle:
         updated = parse_doc(handle.read(), doc.path)
     if not updated.valid:

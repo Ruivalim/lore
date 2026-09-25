@@ -1,0 +1,12 @@
+[Unit]
+Description=lore-sync: reconcilia o acervo Lore com o remoto Git
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Ajuste LORE_ROOT para a raiz do seu acervo.
+Environment=LORE_ROOT=%h/Work/ruivalim/lore
+ExecStart=%h/.local/bin/lore-sync -q
+# Lock serializa contra o auto_commit do CLI; timeout evita travar no git.
+TimeoutStartSec=120

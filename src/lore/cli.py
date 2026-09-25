@@ -10,10 +10,30 @@ import re
 import sys
 
 from . import config as config_mod
+from . import gitops
 from . import repo as repo_mod
 from .models import TYPES, parse_doc
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "templates")
+
+
+def _auto_commit(repo: repo_mod.Repo, action: str, subject: str) -> None:
+    """Commit dos paths tocados pela operação, se [git] auto_commit.
+
+    Nunca faz pull/rebase. Falha de git/rede é silenciosa aqui: o comando já
+    teve sucesso, o push fica pendente e `lore doctor` o denuncia.
+    """
+    cfg, _ = config_mod.load(repo.root)
+    if not gitops.auto_commit_enabled(cfg):
+        return
+    paths = gitops.touched_paths()
+    gitops.clear_touched()
+    if not paths:
+        return
+    try:
+        gitops.commit_paths(repo.root, paths, action, subject)
+    except gitops.GitError:
+        pass
 
 
 def _today() -> str:
@@ -67,6 +87,7 @@ def cmd_new(args, repo: repo_mod.Repo) -> int:
     if not doc.valid:
         return _err(f"template gerou doc inválido: {'; '.join(doc.errors)}", args.json)
     repo_mod.save_atomic(dest, text)
+    _auto_commit(repo, "new", doc_id)
     _out({"ok": True, "message": dest, "id": doc_id, "path": dest}, args.json)
     return 0
 
@@ -76,6 +97,7 @@ def cmd_add(args, repo: repo_mod.Repo) -> int:
         dest = repo_mod.add_file(repo, args.arquivo, args.to, args.move)
     except (ValueError, FileNotFoundError, OSError) as exc:
         return _err(str(exc), args.json)
+    _auto_commit(repo, "add", os.path.basename(dest))
     _out({"ok": True, "message": dest, "path": dest}, args.json)
     return 0
 
@@ -90,6 +112,7 @@ def cmd_import(args, repo: repo_mod.Repo) -> int:
         result = import_markdown(repo, args.arquivo, cfg)
     except (TypeError, ValueError, FileNotFoundError, OSError, RuntimeError) as exc:
         return _err(str(exc), args.json)
+    _auto_commit(repo, "import", result.doc_id)
     payload = {
         "ok": True,
         "id": result.doc_id,
@@ -378,6 +401,7 @@ def cmd_edit(args, repo: repo_mod.Repo) -> int:
         path = review_mod.edit(repo, args.id)
     except (KeyError, ValueError, RuntimeError, OSError) as exc:
         return _err(str(exc), args.json)
+    _auto_commit(repo, "edit", args.id)
     _out({"ok": True, "message": f"documento editado: {path}", "path": path}, args.json)
     return 0
 
@@ -396,6 +420,7 @@ def _state_change(args, repo, action: str) -> int:
         dest = funcs[action]()
     except (KeyError, ValueError, RuntimeError) as exc:
         return _err(str(exc), args.json)
+    _auto_commit(repo, action, args.id)
     _out({"ok": True, "message": dest, "path": dest}, args.json)
     return 0
 
@@ -467,6 +492,13 @@ def run_doctor(repo: repo_mod.Repo) -> tuple[list[str], list[str]]:
 
     if is_stale(repo):
         warnings.append("índice ausente ou dessincronizado; rode: lore reindex")
+
+    if gitops.auto_commit_enabled(cfg) and gitops.is_git_repo(repo.root):
+        ahead = gitops.pending_push(repo.root)
+        if ahead:
+            warnings.append(
+                f"{ahead} commit(s) local(is) não enviado(s); rode: lore-sync ou git push"
+            )
     _ = cfg
     return problems, warnings
 

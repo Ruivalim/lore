@@ -85,7 +85,7 @@ def lore_repo(tmp_path):
     (tmp_path / "drafts" / "sem-id.md").write_text(INVALID_NO_ID, encoding="utf-8")
     (tmp_path / ".lore").mkdir()
     (tmp_path / ".lore" / "config.toml").write_text(
-        "[privacy]\nauto_commit = false\n", encoding="utf-8"
+        "[git]\nauto_commit = false\n", encoding="utf-8"
     )
     return str(tmp_path)
 
