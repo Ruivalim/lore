@@ -48,6 +48,7 @@ if ! flock -n 9; then
 fi
 
 # Trabalho não commitado (ex.: edição manual fora do CLI) vira commit de sync.
+HEAD_BEFORE="$(git rev-parse HEAD)"
 if [[ -n "$(git status --porcelain -- knowledge drafts archive 2>/dev/null)" ]]; then
   git add -- knowledge drafts archive
   git commit -qm "lore(sync): alterações locais ($(hostname -s))" || true
@@ -67,12 +68,20 @@ else
   log "sem upstream configurado; pulando pull"
 fi
 
-# Reindexa se o acervo mudou desde o último índice.
+# Reindexa só se o acervo mudou (ou índice ausente). Reindex sem mudança
+# re-embedaria à toa e ainda apagaria os vetores (reindex reconstrói o
+# index.sqlite do zero, vetores incluídos).
 LORE_BIN="${LORE_BIN:-lore}"
-if command -v "$LORE_BIN" >/dev/null 2>&1; then
-  "$LORE_BIN" --root "$ROOT" reindex >/dev/null || true
+HEAD_AFTER="$(git rev-parse HEAD)"
+if [[ "$HEAD_BEFORE" != "$HEAD_AFTER" || ! -f "$ROOT/.lore/index.sqlite" ]]; then
+  if command -v "$LORE_BIN" >/dev/null 2>&1; then
+    log "acervo mudou; reindexando"
+    "$LORE_BIN" --root "$ROOT" reindex --semantic >/dev/null || true
+  else
+    log "binário lore não encontrado; pulando reindex"
+  fi
 else
-  log "binário lore não encontrado; pulando reindex"
+  log "acervo sem mudanças; reindex pulado"
 fi
 
 # Envia commits pendentes. Recusa por remoto avançado não é fatal aqui.

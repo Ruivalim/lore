@@ -1,9 +1,8 @@
 [Unit]
-Description=Roda lore-sync periodicamente (a cada 15 min)
+Description=Roda lore-sync uma vez ao dia (meio-dia)
 
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=15min
+OnCalendar=*-*-* 12:00:00
 Persistent=true
 
 [Install]
