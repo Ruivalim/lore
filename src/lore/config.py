@@ -21,7 +21,8 @@ DEFAULTS: dict = {
         "sem_weight": 0.3,
     },
     "answer": {"mode": "local-first", "allow_extractive_fallback": True},
-    "research": {"enabled": False, "require_confirmation": True},
+    "research": {"enabled": False, "require_confirmation": True,
+                 "confirm_timeout": 5},
     "privacy": {
         "redact_secrets": True,
         "send_full_documents": False,
@@ -57,6 +58,8 @@ allow_extractive_fallback = true
 [research]
 enabled = false
 require_confirmation = true
+# Sem tecla em N segundos, pesquisa sozinho. 0 espera para sempre.
+confirm_timeout = 5
 # search_provider = "duckduckgo"
 model_provider = "pi-cli"  # pi-cli | openai-compatible
 pi_binary = "pi"

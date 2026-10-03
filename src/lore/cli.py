@@ -7,6 +7,7 @@ import datetime
 import json
 import os
 import re
+import shutil
 import sys
 
 from . import config as config_mod
@@ -212,9 +213,53 @@ def cmd_reindex(args, repo: repo_mod.Repo) -> int:
     return 0
 
 
+def cmd_list(args, repo: repo_mod.Repo) -> int:
+    docs = []
+    for doc in repo_mod.load_all(repo):
+        docs.append({
+            "id": doc.id,
+            "title": str(doc.front.get("title", "")),
+            "type": str(doc.front.get("type", "")),
+            "status": doc.status,
+            "tags": [str(tag) for tag in doc.front.get("tags") or []],
+            "updated_at": str(doc.front.get("updated_at") or ""),
+            "path": os.path.relpath(doc.path, repo.root),
+            "valid": doc.valid,
+        })
+    if args.json:
+        _out({"ok": True, "docs": docs}, True)
+        return 0
+    for item in docs:
+        print(f"{item['status']:<9} {item['type']:<9} {item['id']}  {item['title']}")
+    return 0
+
+
+def find_tui() -> str:
+    """Binário do TUI: $LORE_TUI, senão lore-tui no PATH."""
+    explicit = os.environ.get("LORE_TUI", "")
+    if explicit:
+        return explicit if os.access(explicit, os.X_OK) else ""
+    return shutil.which("lore-tui") or ""
+
+
+def open_tui(args, repo: repo_mod.Repo) -> int:
+    binary = find_tui()
+    if not binary:
+        return _err("lore-tui não encontrado; rode `make tui-install` "
+                    "ou aponte LORE_TUI para o binário", args.json)
+    if args.json or not sys.stdin.isatty() or not sys.stdout.isatty():
+        return _err("o TUI precisa de terminal; passe a pergunta: lore ask \"...\"",
+                    args.json)
+    lore_bin = shutil.which(sys.argv[0]) or os.path.abspath(sys.argv[0])
+    os.execv(binary, [binary, "--root", repo.root, "--lore", lore_bin])
+    return 0  # não volta
+
+
 def cmd_ask(args, repo: repo_mod.Repo) -> int:
     from .answer import ask as run_ask
 
+    if not args.pergunta:
+        return open_tui(args, repo)
     if args.yes:
         from . import config as config_mod
 
@@ -292,13 +337,14 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
             print(message)
         return 1, {"ok": False, "error": message}, False
     confirmed = args.yes or not rcfg.get("require_confirmation", True)
+    if not confirmed and args.json:
+        message = "--json não pergunta; use --yes para pesquisar externamente."
+        return 0, {"ok": False, "error": message}, False
     if not confirmed:
-        try:
-            reply = input(
-                "Pesquisar externamente e criar um rascunho? [S/n] ").strip().lower()
-        except EOFError:
-            reply = "n"
-        confirmed = reply in ("", "s", "y")
+        from .countdown import confirm
+
+        confirmed = confirm("Pesquisar externamente e criar um rascunho?",
+                            float(rcfg.get("confirm_timeout", 5)))
     if not confirmed:
         return 0, None, False
     local_context = "\n\n".join(
@@ -587,7 +633,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--tag", default="")
     p_search.set_defaults(func=cmd_search)
     p_ask = sub.add_parser("ask", help="perguntar à base local")
-    p_ask.add_argument("pergunta")
+    p_ask.add_argument("pergunta", nargs="?", default="",
+                       help="sem pergunta, abre o TUI")
     p_ask.add_argument("--local-only", action="store_true")
     p_ask.add_argument("--extractive", action="store_true",
                        help="não usa modelo para síntese")
@@ -596,6 +643,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--as-of", default="")
     p_ask.add_argument("--yes", action="store_true")
     p_ask.set_defaults(func=cmd_ask)
+    p_list = sub.add_parser("list", help="listar documentos")
+    p_list.set_defaults(func=cmd_list)
     p_reindex = sub.add_parser("reindex", help="reconstruir índice")
     p_reindex.set_defaults(func=cmd_reindex)
     for flag_holder in (p_search, p_ask, p_reindex):

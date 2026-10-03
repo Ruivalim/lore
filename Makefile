@@ -10,6 +10,9 @@ APP ?= lore
 VENV ?= .venv
 PYTHON := $(VENV)/bin/python
 PIPX ?= pipx
+GO ?= go
+TUI_BIN ?= tui/lore-tui
+BIN_DIR ?= $(HOME)/.local/bin
 
 BOLD :=
 CYAN :=
@@ -38,26 +41,39 @@ setup: ## Instala dependências no ambiente virtual
 test: setup ## Executa testes
 	@echo "$(GREEN)▸ test$(RESET)"
 	$(PYTHON) -m pytest -q
+	cd tui && $(GO) test -race ./...
 
 .PHONY: lint
 lint: setup ## Verifica estilo e erros comuns
 	@echo "$(GREEN)▸ lint$(RESET)"
 	$(VENV)/bin/ruff check src tests
+	cd tui && $(GO) vet ./... && test -z "$$(gofmt -l .)"
 
 .PHONY: fmt
-fmt: setup ## Formata Python
+fmt: setup ## Formata Python e Go
 	@echo "$(GREEN)▸ fmt$(RESET)"
 	$(VENV)/bin/ruff format src tests
+	cd tui && gofmt -w .
 
 .PHONY: check
 check: lint test build ## Executa lint, testes e build
 
 ##@ Distribuição
 .PHONY: build
-build: setup ## Empacota wheel em dist/
+build: setup tui ## Empacota wheel em dist/ e compila o TUI
 	@echo "$(GREEN)▸ build$(RESET)"
 	mkdir -p dist
 	$(PYTHON) -m pip wheel . --no-deps -w dist
+
+.PHONY: tui
+tui: ## Compila o TUI (lore ask sem pergunta) em tui/lore-tui
+	@echo "$(GREEN)▸ tui$(RESET)"
+	cd tui && $(GO) build -trimpath -o lore-tui .
+
+.PHONY: tui-install
+tui-install: tui ## Instala lore-tui em ~/.local/bin
+	@echo "$(GREEN)▸ tui-install$(RESET)"
+	install -Dm755 $(TUI_BIN) $(BIN_DIR)/lore-tui
 
 .PHONY: install
 install: ## Instala Lore editável para o usuário via pipx
@@ -76,4 +92,4 @@ uninstall: ## Remove instalação pipx do Lore
 .PHONY: clean
 clean: ## Remove artefatos gerados
 	@echo "$(GREEN)▸ clean$(RESET)"
-	rm -rf build dist .pytest_cache .ruff_cache src/lore.egg-info
+	rm -rf build dist .pytest_cache .ruff_cache src/lore.egg-info $(TUI_BIN)

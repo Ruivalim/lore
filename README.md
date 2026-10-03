@@ -27,12 +27,14 @@ pi:
 
 `lore import` usa Pi para classificar título, tipo e tags, preserva corpo original e salva em `drafts/`. Segredos detectados bloqueiam envio ao modelo. `lore add` continua disponível para importar documentos que já têm front matter Lore válido. Respostas usam `pi --print` sem sessão, ferramentas ou recursos de projeto. Embeddings semânticos continuam configurados separadamente.
 
-Pesquisa externa exige configuração e confirmação; `--yes` pula confirmação, mas não os bloqueios de privacidade. Promoção e outras mudanças de estado exigem `--human`.
+Pesquisa externa exige configuração e confirmação; `--yes` pula confirmação, mas não os bloqueios de privacidade. No terminal a confirmação conta `research.confirm_timeout` segundos (padrão 5) e, sem nenhuma tecla, pesquisa sozinha; `n` ou `esc` cancela, `enter` vai na hora, qualquer outra tecla pausa a contagem. Fora de terminal (pipe, script) nada é assumido. Promoção e outras mudanças de estado exigem `--human`.
+
+`lore ask` sem pergunta abre o TUI (`lore-tui`, em Go): lista do acervo com filtro, leitura dos documentos e campo de pergunta, com a mesma contagem antes de pesquisar. Instale com `make tui-install` (vai para `~/.local/bin`) ou aponte `LORE_TUI` para o binário.
 
 Para desenvolver e testar:
 
 ```sh
-python -m pytest -q
+make test   # pytest + go test do TUI
 ```
 
 ## 1. Visão
@@ -174,10 +176,10 @@ Quando não houver evidência local suficiente:
 
 ```text
 A base não contém uma resposta confiável.
-Pesquisar na internet e criar um rascunho? [S/n]
+Pesquisar externamente e criar um rascunho? [S/n] (5s)
 ```
 
-Após confirmação:
+Após confirmação, ou se a contagem acabar sem interação:
 
 1. pesquisar fontes externas;
 2. priorizar documentação oficial e fontes primárias;
@@ -534,6 +536,8 @@ Credenciais de provedores ficam fora do repositório, preferencialmente em vari�
 
 ```text
 lore ask "pergunta"
+lore ask                     (abre o TUI)
+lore list
 lore search "termos"
 lore show <id>
 lore add <arquivo.md>
@@ -565,7 +569,7 @@ Opções previstas:
 --yes              aceita fallback externo sem prompt interativo
 ```
 
-`--yes` só funciona quando política de privacidade e provedor estão configurados. Com `--json`, o fallback externo também roda e retorna `researched` mais `research`, contendo resposta, caminho do rascunho, fontes, descartes e eventual erro ou bloqueio. Todo conteúdo pesquisado continua como `draft` até `lore approve <id> --human`.
+`--yes` só funciona quando política de privacidade e provedor estão configurados. `--json` nunca pergunta nem conta: sem `--yes` não pesquisa e avisa em `research.error`. Com `--json --yes`, o fallback externo roda e retorna `researched` mais `research`, contendo resposta, caminho do rascunho, fontes, descartes e eventual erro ou bloqueio. Todo conteúdo pesquisado continua como `draft` até `lore approve <id> --human`.
 
 ### 13.2 `lore search`
 
@@ -608,6 +612,7 @@ allow_extractive_fallback = true
 [research]
 enabled = true
 require_confirmation = true
+confirm_timeout = 5   # segundos sem tecla até pesquisar sozinho; 0 espera
 provider = "remote-strong-model"
 web_search = true
 

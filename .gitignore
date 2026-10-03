@@ -44,3 +44,6 @@ data/
 # estado local de agentes
 /.pi/
 /.claude/worktrees/
+
+# binário do TUI (make tui)
+/tui/lore-tui

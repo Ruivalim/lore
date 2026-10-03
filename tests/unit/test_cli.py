@@ -120,3 +120,53 @@ def test_installed_binary_runs():
     )
     assert proc.returncode == 0
     assert "usage" in proc.stdout
+
+
+def test_list_json_has_every_doc(lore_repo, capsys):
+    assert run_cli(lore_repo, "--json", "list") == 0
+    docs = json.loads(capsys.readouterr().out)["docs"]
+    by_id = {doc["id"]: doc for doc in docs}
+    assert by_id["wireguard-split-dns"]["status"] == "verified"
+    assert by_id["wireguard-split-dns"]["path"] == "knowledge/wireguard-split-dns.md"
+    assert by_id["ideia-backup"]["tags"] == ["pessoal"]
+    # doc inválido aparece (sem id) e marcado, para o TUI não esconder problema
+    assert any(not doc["valid"] for doc in docs)
+
+
+def test_ask_without_question_needs_tui(lore_repo, capsys, monkeypatch):
+    monkeypatch.delenv("LORE_TUI", raising=False)
+    monkeypatch.setenv("PATH", "/nao/existe")
+    assert run_cli(lore_repo, "ask") == 1
+    assert "lore-tui não encontrado" in capsys.readouterr().err
+
+
+def test_ask_without_question_refuses_without_terminal(lore_repo, tmp_path, capsys, monkeypatch):
+    fake = tmp_path / "lore-tui"
+    fake.write_text("#!/bin/sh\nexit 0\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("LORE_TUI", str(fake))
+    # pytest captura stdin/stdout: não é TTY, então não pode dar exec.
+    assert run_cli(lore_repo, "ask") == 1
+    assert "precisa de terminal" in capsys.readouterr().err
+
+
+def test_ask_without_question_execs_tui(lore_repo, tmp_path, monkeypatch):
+    fake = tmp_path / "lore-tui"
+    fake.write_text("#!/bin/sh\nexit 0\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("LORE_TUI", str(fake))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True, raising=False)
+    calls = []
+    monkeypatch.setattr(os, "execv", lambda path, argv: calls.append(argv))
+    assert run_cli(lore_repo, "ask") == 0
+    assert calls and calls[0][0] == str(fake)
+    assert calls[0][1:3] == ["--root", lore_repo]
+    assert calls[0][3] == "--lore"
+
+
+def test_lore_tui_env_not_executable(lore_repo, tmp_path, capsys, monkeypatch):
+    fake = tmp_path / "lore-tui"
+    fake.write_text("nada")
+    monkeypatch.setenv("LORE_TUI", str(fake))
+    assert run_cli(lore_repo, "ask") == 1

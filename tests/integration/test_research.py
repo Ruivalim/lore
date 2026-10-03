@@ -1,5 +1,6 @@
 """Fase 4: pesquisa externa, rascunho, segurança (§18.3)."""
 
+import io
 import os
 import threading
 import urllib.request
@@ -338,7 +339,7 @@ def test_cli_decline_keeps_local_only(repo, monkeypatch, capsys):
               encoding="utf-8") as handle:
         handle.write('[research]\nenabled = true\n'
                      'model_endpoint = "http://x"\n')
-    monkeypatch.setattr("builtins.input", lambda *a: "n")
+    monkeypatch.setattr("sys.stdin", io.StringIO("n\n"))
     called = []
     monkeypatch.setattr("lore.research.research",
                         lambda *a, **k: called.append(True) or ResearchResult(ok=False))
@@ -354,10 +355,33 @@ def test_cli_accept_runs_research(repo, monkeypatch, capsys):
               encoding="utf-8") as handle:
         handle.write('[research]\nenabled = true\n'
                      'model_endpoint = "http://x"\n')
-    monkeypatch.setattr("builtins.input", lambda *a: "S")
+    monkeypatch.setattr("sys.stdin", io.StringIO("S\n"))
     monkeypatch.setattr(
         "lore.research.research",
         lambda *a, **k: ResearchResult(ok=True, answer="RESPOSTA EXTERNA",
                                        draft_path="/tmp/x.md"))
     assert main(["--root", repo.root, "ask", "pergunta obscura"]) == 0
     assert "RESPOSTA EXTERNA" in capsys.readouterr().out
+
+
+def test_json_mode_never_prompts_or_researches(tmp_path, monkeypatch, capsys):
+    import json as json_mod
+
+    from lore.cli import main
+
+    for dirname in ("knowledge", "drafts", "archive", ".lore"):
+        (tmp_path / dirname).mkdir()
+    (tmp_path / ".lore" / "config.toml").write_text(
+        '[research]\nenabled = true\nrequire_confirmation = true\nconfirm_timeout = 1\n',
+        encoding="utf-8",
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("não podia pesquisar nem perguntar em --json")
+
+    monkeypatch.setattr("lore.research.research", boom)
+    monkeypatch.setattr("lore.countdown.confirm", boom)
+    assert main(["--root", str(tmp_path), "--json", "ask", "pergunta sem resposta"]) == 0
+    payload = json_mod.loads(capsys.readouterr().out)
+    assert payload["researched"] is False
+    assert "--yes" in payload["research"]["error"]
