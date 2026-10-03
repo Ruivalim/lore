@@ -267,7 +267,7 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
         research = cfg.get("research", {})
         provider = research.get("model_provider", "pi-cli")
         if (not research.get("enabled")
-                or provider not in ("pi-cli", "openai-compatible")
+                or provider not in PROVIDERS
                 or (provider == "openai-compatible" and not research.get("model_endpoint"))):
             return _err("--yes exige pesquisa habilitada e backend de modelo configurado", args.json)
     if args.as_of and not re.match(r"^\d{4}-\d{2}-\d{2}$", args.as_of):
@@ -311,12 +311,17 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
     return 0
 
 
+PROVIDERS = ("pi-cli", "openai-compatible", "claude-cli")
+
+
 def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
     from .research import (
+        ClaudeAgent,
         OpenAICompatibleModel,
         PiCLIModel,
         WEB_SEARCHES,
         research,
+        research_agent,
     )
 
     cfg, _ = config_mod.load(repo.root)
@@ -331,7 +336,7 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
         if not args.json:
             print(message)
         return 1, {"ok": False, "error": message}, False
-    if provider not in ("pi-cli", "openai-compatible"):
+    if provider not in PROVIDERS:
         message = f"backend de pesquisa desconhecido ({provider}); pergunta preservada."
         if not args.json:
             print(message)
@@ -351,21 +356,33 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
         f"[fonte local: {citation}]\n{text}"
         for citation, text in answer.context[:3]
     )
-    web_cls = WEB_SEARCHES.get(rcfg.get("search_provider", "duckduckgo"),
-                               WEB_SEARCHES["duckduckgo"])
-    if provider == "pi-cli":
-        model = PiCLIModel(
-            model=rcfg.get("pi_model", pi_cfg.get("model", "")),
-            binary=rcfg.get("pi_binary", pi_cfg.get("binary", "pi")),
+    if provider == "claude-cli":
+        if not args.json:
+            print("Pesquisando com Claude (web, base Lore e Remnic)…", flush=True)
+        agent = ClaudeAgent(
+            binary=rcfg.get("claude_binary", "claude"),
+            model=rcfg.get("claude_model", ""),
+            max_budget_usd=float(rcfg.get("max_budget_usd", 0) or 0),
+            cwd=repo.root,
         )
+        result = research_agent(repo, question, local_context, agent=agent,
+                                extra_patterns=rcfg.get("extra_patterns", []))
     else:
-        model = OpenAICompatibleModel(
-            endpoint,
-            rcfg.get("model_name", "lore-remote"),
-            os.environ.get("LORE_REMOTE_API_KEY", ""),
-        )
-    result = research(repo, question, local_context, web=web_cls(), model=model,
-                      extra_patterns=rcfg.get("extra_patterns", []))
+        web_cls = WEB_SEARCHES.get(rcfg.get("search_provider", "duckduckgo"),
+                                   WEB_SEARCHES["duckduckgo"])
+        if provider == "pi-cli":
+            model = PiCLIModel(
+                model=rcfg.get("pi_model", pi_cfg.get("model", "")),
+                binary=rcfg.get("pi_binary", pi_cfg.get("binary", "pi")),
+            )
+        else:
+            model = OpenAICompatibleModel(
+                endpoint,
+                rcfg.get("model_name", "lore-remote"),
+                os.environ.get("LORE_REMOTE_API_KEY", ""),
+            )
+        result = research(repo, question, local_context, web=web_cls(), model=model,
+                          extra_patterns=rcfg.get("extra_patterns", []))
     result_payload = {
         "ok": result.ok,
         "answer": result.answer,

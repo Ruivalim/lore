@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 // Doc é uma linha de `lore list --json`.
@@ -84,6 +85,10 @@ type ExecLore struct {
 func (l ExecLore) run(ctx context.Context, out any, args ...string) error {
 	full := append([]string{"--root", l.Root, "--json"}, args...)
 	cmd := exec.CommandContext(ctx, l.Bin, full...)
+	// Cancelar mata o grupo todo: o lore chama claude/pi como filhos, e
+	// matar só o Python deixaria o agente rodando órfão e gastando.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

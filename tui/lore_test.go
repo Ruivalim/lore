@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -104,4 +106,43 @@ func TestResearchConfigDefaultsToConfirm(t *testing.T) {
 	if err != nil || !cfg.Enabled || !cfg.Confirm() {
 		t.Fatalf("cfg %+v err %v", cfg, err)
 	}
+}
+
+func TestCancelKillsGrandchildren(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	// Simula lore -> claude: o neto grava o PID e dorme.
+	bin := fakeBin(t, `sh -c 'echo $$ > `+pidFile+`; exec sleep 30' &
+wait`)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for i := 0; i < 50; i++ {
+			if _, err := os.Stat(pidFile); err == nil {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		cancel()
+	}()
+	started := time.Now()
+	if _, err := (ExecLore{Bin: bin}).Ask(ctx, "q", true); err != context.Canceled {
+		t.Fatalf("err %v", err)
+	}
+	// Sem matar o grupo, Wait espera o neto soltar o stdout: 30s travado.
+	if time.Since(started) > 5*time.Second {
+		t.Fatalf("cancelamento levou %v", time.Since(started))
+	}
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal("neto nunca subiu")
+	}
+	var pid int
+	fmt.Sscan(string(raw), &pid)
+	for i := 0; i < 50; i++ {
+		if syscall.Kill(pid, 0) != nil {
+			return // morreu
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	syscall.Kill(pid, syscall.SIGKILL)
+	t.Fatalf("processo neto %d sobreviveu ao cancelamento", pid)
 }

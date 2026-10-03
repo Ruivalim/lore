@@ -317,7 +317,12 @@ def research(repo: repo_mod.Repo, question: str, local_context: str = "",
         return ResearchResult(ok=False, error=(
             "resposta do modelo continha padrão de instruction; descartada. "
             "Pergunta preservada."), sources=[s for s in passages], discarded=discarded)
-    front, body = build_draft(question, response, passages)
+    return _save_draft(repo, question, response, passages, discarded)
+
+
+def _save_draft(repo: repo_mod.Repo, question: str, response: str,
+                sources: list[Source], discarded: list[str]) -> ResearchResult:
+    front, body = build_draft(question, response, sources)
     base_id = front["id"]
     counter = 1
     while repo_mod.find_by_id(repo, front["id"]) is not None:
@@ -327,7 +332,7 @@ def research(repo: repo_mod.Repo, question: str, local_context: str = "",
     if errors:
         return ResearchResult(ok=False, error=(
             f"rascunho gerado inválido ({'; '.join(errors)}). Nada foi salvo."),
-            sources=passages, discarded=discarded)
+            sources=sources, discarded=discarded)
     while True:
         dest = repo_mod._safe_join(repo.root, repo_mod.DRAFTS, front["id"] + ".md")
         try:
@@ -341,4 +346,62 @@ def research(repo: repo_mod.Repo, question: str, local_context: str = "",
         f"Rascunho salvo em:\n  {dest}\n\n{response.strip()}\n"
     )
     return ResearchResult(ok=True, answer=answer, draft_path=dest,
-                          sources=passages, discarded=discarded)
+                          sources=sources, discarded=discarded)
+
+
+class ClaudeAgent:
+    """`claude -p` como pesquisador: ele mesmo busca, lê e consulta contexto."""
+
+    name = "claude-cli"
+
+    def __init__(self, binary: str = "claude", model: str = "",
+                 max_budget_usd: float = 0, cwd: str | None = None):
+        self.binary = binary
+        self.model = model
+        self.max_budget_usd = max_budget_usd
+        self.cwd = cwd
+
+    def run(self, question: str, local_context: str):
+        from . import claude_cli
+
+        return claude_cli.research(
+            question, local_context, binary=self.binary, model=self.model,
+            cwd=self.cwd, max_budget_usd=self.max_budget_usd)
+
+
+def research_agent(repo: repo_mod.Repo, question: str, local_context: str = "",
+                   agent: ClaudeAgent | None = None,
+                   extra_patterns: list[str] | None = None) -> ResearchResult:
+    """Pesquisa por agente. Mesmos bloqueios de entrada do research(); na
+    saída, segredo também bloqueia, porque o agente lê Remnic e arquivos e o
+    rascunho vai para o Git."""
+    redacted_q = scan(question, extra_patterns)
+    if redacted_q.found:
+        return ResearchResult(ok=False, blocked=(
+            f"envio remoto bloqueado: possível segredo na pergunta ({', '.join(redacted_q.found)}). "
+            "Remova e tente de novo."))
+    redacted_ctx = scan(local_context, extra_patterns)
+    if redacted_ctx.found:
+        return ResearchResult(ok=False, blocked=(
+            f"envio remoto bloqueado: possível segredo no contexto local ({', '.join(redacted_ctx.found)}). "
+            "Ajuste privacy.extra_patterns ou remova o trecho."))
+    agent = agent or ClaudeAgent(cwd=repo.root)
+    try:
+        result = agent.run(redacted_q.text, redacted_ctx.text)
+    except Exception as exc:  # noqa: BLE001 - contrato: explica e preserva
+        return ResearchResult(ok=False, error=(
+            f"pesquisa com Claude falhou ({exc}). Pergunta preservada; repita depois."))
+    leaked = scan(result.answer, extra_patterns)
+    if leaked.found:
+        return ResearchResult(ok=False, blocked=(
+            f"resposta do Claude contém possível segredo ({', '.join(leaked.found)}); "
+            "nada foi salvo."))
+    if scan_injection(result.answer):
+        return ResearchResult(ok=False, error=(
+            "resposta do Claude continha padrão de instruction; descartada. "
+            "Pergunta preservada."))
+    today = _today()
+    sources = [Source(url=src["url"], title=src["title"], accessed_at=today)
+               for src in result.sources]
+    discarded = [f"ferramenta negada: {tool}" for tool in result.denied]
+    return _save_draft(repo, question, result.answer, sources, discarded)

@@ -61,8 +61,11 @@ require_confirmation = true
 # Sem tecla em N segundos, pesquisa sozinho. 0 espera para sempre.
 confirm_timeout = 5
 # search_provider = "duckduckgo"
-model_provider = "pi-cli"  # pi-cli | openai-compatible
+model_provider = "pi-cli"  # pi-cli | openai-compatible | claude-cli
 pi_binary = "pi"
+# claude-cli: Claude Code headless pesquisa sozinho (web, lore, Remnic).
+# claude_model = "claude-opus-5-5"
+# max_budget_usd = 2  # teto por pesquisa; 0 sem teto
 # pi_model = "provider/model-id"  # vazio usa o modelo global do Pi
 # model_endpoint = "http://localhost:11434/v1"  # backend legado
 # model_name = "local-model"

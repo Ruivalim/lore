@@ -29,6 +29,8 @@ pi:
 
 Pesquisa externa exige configuração e confirmação; `--yes` pula confirmação, mas não os bloqueios de privacidade. No terminal a confirmação conta `research.confirm_timeout` segundos (padrão 5) e, sem nenhuma tecla, pesquisa sozinha; `n` ou `esc` cancela, `enter` vai na hora, qualquer outra tecla pausa a contagem. Fora de terminal (pipe, script) nada é assumido. Promoção e outras mudanças de estado exigem `--human`.
 
+Com `research.model_provider = "claude-cli"`, quem pesquisa é o Claude Code em modo headless (`claude -p`, Opus 5.5 por padrão, `claude_model` troca). Ele busca e lê páginas na web, consulta a base com `lore search`/`lore show` e o Remnic, e devolve resposta e fontes em JSON; o Lore valida e salva o rascunho. Roda no modo de permissão `auto`, sem Edit/Write e sem os conectores de Gmail, Drive e Calendar. Segredo detectado na resposta bloqueia o rascunho, porque o agente lê memória pessoal e `drafts/` vai para o Git. `max_budget_usd` limita o gasto por pesquisa.
+
 `lore ask` sem pergunta abre o TUI (`lore-tui`, em Go): lista do acervo com filtro, leitura dos documentos e campo de pergunta, com a mesma contagem antes de pesquisar. Instale com `make tui-install` (vai para `~/.local/bin`) ou aponte `LORE_TUI` para o binário.
 
 Para desenvolver e testar:
@@ -613,7 +615,8 @@ allow_extractive_fallback = true
 enabled = true
 require_confirmation = true
 confirm_timeout = 5   # segundos sem tecla até pesquisar sozinho; 0 espera
-provider = "remote-strong-model"
+model_provider = "claude-cli"   # pi-cli | openai-compatible | claude-cli
+max_budget_usd = 2
 web_search = true
 
 [privacy]
