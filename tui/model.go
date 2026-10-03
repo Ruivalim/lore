@@ -141,6 +141,14 @@ type Model struct {
 
 	renderer      *glamour.TermRenderer
 	rendererWidth int
+
+	// revisão de rascunhos (review.go)
+	statusFilter statusFilter
+	reviewMode   reviewMode
+	reason       textinput.Model
+	review       *ReviewInfo
+	notice       string
+	busy         string
 }
 
 func NewModel(l Lore, root, glamourStyle string) Model {
@@ -172,6 +180,7 @@ func NewModel(l Lore, root, glamourStyle string) Model {
 		view:    viewport.New(40, 10),
 		input:   in,
 		spinner: sp,
+		reason:  newReasonInput(),
 	}
 }
 
@@ -254,6 +263,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if nm, cmd, ok := m.updateReview(msg); ok {
+		return nm, cmd
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -272,19 +284,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.docs = msg.docs
-		items := make([]list.Item, len(msg.docs))
-		selected := -1
-		for i, d := range msg.docs {
-			items[i] = item{doc: d}
-			if msg.selectPath != "" && filepath.Join(m.root, d.Path) == filepath.Clean(msg.selectPath) {
-				selected = i
-			}
-		}
-		cmd := m.list.SetItems(items)
-		if selected >= 0 {
-			m.list.ResetFilter()
-			m.list.Select(selected)
-		}
+		cmd := m.applyItems(msg.selectPath)
 		if !m.showingAnswer {
 			return m, tea.Batch(cmd, m.selectionChanged())
 		}
@@ -367,6 +367,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.stopAsk()
 		return m, tea.Quit
 	}
+	// Aviso e erro somem na próxima tecla: já foram vistos.
+	m.notice, m.err = "", ""
+	if m.reviewMode != reviewNone {
+		nm, cmd, _ := m.handleReviewKey(msg)
+		return nm, cmd
+	}
 
 	// Durante a contagem o teclado decide; qualquer outra tecla pausa.
 	if m.state == askCountdown {
@@ -402,7 +408,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if q == "" {
 				return m, nil
 			}
-			m.err = ""
 			m.question = q
 			m.input.SetValue("")
 			return m, m.runAsk(false)
@@ -416,6 +421,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
 		return m, tea.Batch(cmd, m.selectionChanged())
+	}
+
+	if nm, cmd, ok := m.handleReviewKey(msg); ok {
+		return nm, cmd
 	}
 
 	switch key {
@@ -484,8 +493,12 @@ func (m *Model) selectionChanged() tea.Cmd {
 	}
 	m.docID = sel.doc.ID
 	m.docDetail = nil
+	m.review = nil
 	m.showingAnswer = false
 	m.refreshView()
+	if sel.doc.Status == "draft" {
+		return tea.Batch(m.loadDoc(sel.doc.ID), m.loadReview(sel.doc.ID))
+	}
 	return m.loadDoc(sel.doc.ID)
 }
 
@@ -591,6 +604,9 @@ func (m *Model) refreshView() {
 			rel = d.Path
 		}
 		b.WriteString(mutedStyle.Render(rel) + "\n\n")
+		if status == "draft" {
+			b.WriteString(m.reviewBlock())
+		}
 		b.WriteString(m.markdown(dropTitle(d.Body, title)))
 	case m.docID != "":
 		b.WriteString(mutedStyle.Render("carregando…"))
@@ -657,6 +673,9 @@ func (m Model) banner() string {
 		}
 		return bannerStyle.Width(width).Render(lead + " " + action)
 	}
+	if rb := m.reviewBanner(width); rb != "" {
+		return rb
+	}
 	if m.err != "" {
 		return bannerStyle.BorderForeground(colRed).Width(width).Render(
 			errorStyle.Render("erro: ") + m.err)
@@ -714,6 +733,9 @@ func (m Model) listStatus() string {
 		noun = "documento"
 	}
 	text := fmt.Sprintf("%d %s", total, noun)
+	if m.statusFilter != showAll {
+		text = fmt.Sprintf("%d %s", total, m.statusFilter.label())
+	}
 	if m.list.FilterState() != list.Unfiltered {
 		text = fmt.Sprintf("“%s” · %d de %d", m.list.FilterValue(), shown, total)
 	}
@@ -721,8 +743,12 @@ func (m Model) listStatus() string {
 }
 
 func (m Model) helpLine() string {
-	pairs := [][2]string{{"a", "perguntar"}, {"/", "filtrar"}, {"tab", "foco"},
-		{"enter", "abrir"}, {"r", "recarregar"}, {"q", "sair"}}
+	pairs := [][2]string{{"a", "perguntar"}, {"/", "filtrar"},
+		{"v", "ver " + ((m.statusFilter + 1) % 3).label()}, {"e", "editar"}, {"tab", "foco"},
+		{"r", "recarregar"}, {"q", "sair"}}
+	if doc, ok := m.selectedDoc(); ok && doc.Status == "draft" {
+		pairs = append([][2]string{{"A", "aprovar"}, {"R", "rejeitar"}}, pairs...)
+	}
 	if m.answer != nil && m.research.Enabled && m.state == askIdle {
 		pairs = append([][2]string{{"p", "pesquisar com IA"}}, pairs...)
 	}

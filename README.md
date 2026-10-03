@@ -31,7 +31,7 @@ Pesquisa externa exige configuração e confirmação; `--yes` pula confirmaçã
 
 Com `research.model_provider = "claude-cli"`, quem pesquisa é o Claude Code em modo headless (`claude -p`, Opus 5.5 por padrão, `claude_model` troca). Ele busca e lê páginas na web, consulta a base com `lore search`/`lore show` e o Remnic, e devolve resposta e fontes em JSON; o Lore valida e salva o rascunho. Roda no modo de permissão `auto`, sem Edit/Write e sem os conectores de Gmail, Drive e Calendar. Segredo detectado na resposta bloqueia o rascunho, porque o agente lê memória pessoal e `drafts/` vai para o Git. `max_budget_usd` limita o gasto por pesquisa.
 
-`lore ask` sem pergunta abre o TUI (`lore-tui`, em Go): lista do acervo com filtro, leitura dos documentos e campo de pergunta, com a mesma contagem antes de pesquisar. Instale com `make tui-install` (vai para `~/.local/bin`) ou aponte `LORE_TUI` para o binário.
+`lore ask` sem pergunta abre o TUI (`lore-tui`, em Go): lista do acervo com filtro, leitura dos documentos e campo de pergunta, com a mesma contagem antes de pesquisar. Também revisa rascunhos: `v` alterna entre todos, rascunhos e verificados; num rascunho aparecem antes do texto os possíveis conflitos com a base e os trechos sem fonte; `A` aprova (pede confirmação), `R` rejeita (pede o motivo) e `e` abre no `$EDITOR`. Aprovar e rejeitar pelo TUI equivale a `--human`. Instale com `make tui-install` (vai para `~/.local/bin`) ou aponte `LORE_TUI` para o binário.
 
 Para desenvolver e testar:
 

@@ -68,12 +68,26 @@ func (c ResearchConfig) Confirm() bool {
 	return c.RequireConfirmation == nil || *c.RequireConfirmation
 }
 
+// ReviewInfo é o que `lore review <id> --json` aponta num rascunho.
+type ReviewInfo struct {
+	Valid             bool     `json:"valid"`
+	Errors            []string `json:"errors"`
+	UnsourcedClaims   []string `json:"unsourced_claims"`
+	PossibleConflicts []string `json:"possible_conflicts"`
+}
+
 // Lore é tudo que o TUI pede ao CLI Python. Interface para os testes.
 type Lore interface {
 	List(ctx context.Context) ([]Doc, error)
 	Show(ctx context.Context, id string) (DocDetail, error)
 	Research(ctx context.Context) (ResearchConfig, error)
 	Ask(ctx context.Context, question string, research bool) (AskResult, error)
+	Review(ctx context.Context, id string) (ReviewInfo, error)
+	// Approve e Reject devolvem o caminho novo do documento.
+	Approve(ctx context.Context, id string) (string, error)
+	Reject(ctx context.Context, id, reason string) (string, error)
+	// EditCmd é interativo (abre $EDITOR), por isso devolve o comando.
+	EditCmd(id string) *exec.Cmd
 }
 
 // ExecLore chama o binário `lore` e lê o JSON da saída.
@@ -117,7 +131,8 @@ func decode(stdout []byte, stderr string, runErr error, out any) error {
 		return fmt.Errorf("resposta do lore não é JSON: %s", firstLine(detail))
 	}
 	if !*head.OK && head.Error != "" {
-		return errors.New(head.Error)
+		// KeyError do Python chega como "'id não encontrado: x'".
+		return errors.New(strings.Trim(head.Error, "'"))
 	}
 	if err := json.Unmarshal(stdout, out); err != nil {
 		return fmt.Errorf("JSON inesperado do lore: %w", err)
@@ -165,4 +180,32 @@ func (l ExecLore) Ask(ctx context.Context, question string, research bool) (AskR
 	}
 	err := l.run(ctx, &out, "ask", flag, "--", question)
 	return out, err
+}
+
+func (l ExecLore) Review(ctx context.Context, id string) (ReviewInfo, error) {
+	var out ReviewInfo
+	err := l.run(ctx, &out, "review", "--", id)
+	return out, err
+}
+
+type pathOut struct {
+	Path string `json:"path"`
+}
+
+// Aprovar e rejeitar exigem --human no CLI: aqui quem apertou a tecla e
+// confirmou foi a pessoa, é exatamente o caso.
+func (l ExecLore) Approve(ctx context.Context, id string) (string, error) {
+	var out pathOut
+	err := l.run(ctx, &out, "approve", "--human", "--", id)
+	return out.Path, err
+}
+
+func (l ExecLore) Reject(ctx context.Context, id, reason string) (string, error) {
+	var out pathOut
+	err := l.run(ctx, &out, "reject", "--human", "--reason", reason, "--", id)
+	return out.Path, err
+}
+
+func (l ExecLore) EditCmd(id string) *exec.Cmd {
+	return exec.Command(l.Bin, "--root", l.Root, "edit", "--", id)
 }

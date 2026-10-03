@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -19,11 +20,38 @@ type fakeLore struct {
 	research AskResult
 	askErr   error
 	asks     []bool // research? de cada chamada
+
+	review     ReviewInfo
+	actionErr  error
+	approved   []string
+	rejected   [][2]string // id, motivo
+	edited     []string
+	actionPath string
+}
+
+func (f *fakeLore) Review(context.Context, string) (ReviewInfo, error) { return f.review, nil }
+func (f *fakeLore) Approve(_ context.Context, id string) (string, error) {
+	f.approved = append(f.approved, id)
+	return f.actionPath, f.actionErr
+}
+func (f *fakeLore) Reject(_ context.Context, id, reason string) (string, error) {
+	f.rejected = append(f.rejected, [2]string{id, reason})
+	return f.actionPath, f.actionErr
+}
+func (f *fakeLore) EditCmd(id string) *exec.Cmd {
+	f.edited = append(f.edited, id)
+	return exec.Command("true")
 }
 
 func (f *fakeLore) List(context.Context) ([]Doc, error) { return f.docs, nil }
 func (f *fakeLore) Show(_ context.Context, id string) (DocDetail, error) {
-	return DocDetail{Front: map[string]any{"id": id, "title": id}, Body: "# " + id + "\n\ncorpo"}, nil
+	front := map[string]any{"id": id, "title": id}
+	for _, d := range f.docs {
+		if d.ID == id {
+			front["status"] = d.Status
+		}
+	}
+	return DocDetail{Front: front, Body: "# " + id + "\n\ncorpo"}, nil
 }
 func (f *fakeLore) Research(context.Context) (ResearchConfig, error) { return f.cfg, nil }
 func (f *fakeLore) Ask(_ context.Context, _ string, research bool) (AskResult, error) {
