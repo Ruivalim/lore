@@ -38,9 +38,6 @@ Thumbs.db
 # diretório de app estranho ao projeto (não versionar)
 data/
 
-# cache local do grafo do graft, regenerável
-/graft/
-
 # estado local de agentes
 /.pi/
 /.claude/worktrees/
