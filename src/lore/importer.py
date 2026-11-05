@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from . import repo as repo_mod
 from .models import TYPES, parse_doc, validate
-from .pi_cli import complete
+from . import agents as agents_mod
 from .redact import scan
 
 MAX_IMPORT_BYTES = 300_000
@@ -42,19 +42,19 @@ def _metadata_from_response(response: str) -> tuple[str, str, list[str]]:
     try:
         data = json.loads(candidate)
     except json.JSONDecodeError as exc:
-        raise ValueError("Pi não retornou metadados JSON válidos") from exc
+        raise ValueError("o agente não retornou metadados JSON válidos") from exc
     if not isinstance(data, dict):
-        raise TypeError("metadados do Pi devem ser um objeto JSON")
+        raise TypeError("metadados do agente devem ser um objeto JSON")
 
     title = data.get("title")
     doc_type = data.get("type")
     raw_tags = data.get("tags")
     if not isinstance(title, str) or not title.strip() or len(title.strip()) > 160:
-        raise ValueError("Pi retornou título inválido")
+        raise ValueError("o agente retornou título inválido")
     if doc_type not in TYPES:
-        raise ValueError(f"Pi retornou tipo inválido: {doc_type!r}")
+        raise ValueError(f"o agente retornou tipo inválido: {doc_type!r}")
     if not isinstance(raw_tags, list) or not raw_tags:
-        raise ValueError("Pi deve retornar ao menos uma tag")
+        raise ValueError("o agente deve retornar ao menos uma tag")
     tags = list(
         dict.fromkeys(
             _slug(tag)
@@ -63,12 +63,12 @@ def _metadata_from_response(response: str) -> tuple[str, str, list[str]]:
         )
     )
     if not tags:
-        raise ValueError("Pi não retornou tags válidas")
+        raise ValueError("o agente não retornou tags válidas")
     return " ".join(title.split()), doc_type, tags
 
 
 def import_markdown(repo: repo_mod.Repo, source: str, cfg: dict) -> ImportResult:
-    """Extrai metadados com Pi, preserva corpo e salva sempre em drafts/."""
+    """Extrai metadados com o agente de import, preserva corpo e salva sempre em drafts/."""
     source_path = os.path.realpath(source)
     if not os.path.isfile(source_path):
         raise FileNotFoundError(f"Markdown não encontrado: {source}")
@@ -87,7 +87,7 @@ def import_markdown(repo: repo_mod.Repo, source: str, cfg: dict) -> ImportResult
     redacted = scan(original, privacy.get("extra_patterns", []))
     if redacted.found:
         raise ValueError(
-            "importação para Pi bloqueada: possível segredo detectado "
+            "importação bloqueada: possível segredo detectado "
             f"({', '.join(redacted.found)})"
         )
 
@@ -104,12 +104,7 @@ def import_markdown(repo: repo_mod.Repo, source: str, cfg: dict) -> ImportResult
         "Markdown para classificar:\n"
         f"<markdown>\n{original}\n</markdown>"
     )
-    pi_cfg = cfg.get("pi", {})
-    response = complete(
-        prompt,
-        binary=pi_cfg.get("binary", "pi"),
-        model=pi_cfg.get("model", ""),
-    )
+    response = agents_mod.resolve(cfg, "import").complete(prompt)
     title, doc_type, tags = _metadata_from_response(response)
 
     doc_id = _slug(title)

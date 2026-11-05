@@ -13,7 +13,6 @@ from __future__ import annotations
 import datetime
 import html
 import ipaddress
-import json
 import re
 import socket
 import urllib.parse
@@ -106,51 +105,19 @@ class RemoteModel:
         raise NotImplementedError
 
 
-class PiCLIModel(RemoteModel):
-    name = "pi-cli"
+class AgentModel(RemoteModel):
+    """Qualquer agente de texto (lore.agents) fazendo a redação da pesquisa."""
 
-    def __init__(self, endpoint: str = "", model: str = "",
-                 api_key: str = "", binary: str = "pi"):
-        self.model = model
-        self.binary = binary
-
-    def complete(self, prompt: str) -> str:
-        from .pi_cli import complete
-
-        return complete(prompt, binary=self.binary, model=self.model)
-
-
-class OpenAICompatibleModel(RemoteModel):
-    name = "openai-compatible"
-
-    def __init__(self, endpoint: str, model: str, api_key: str = ""):
-        self.endpoint = endpoint.rstrip("/")
-        self.model = model
-        self.api_key = api_key
+    def __init__(self, agent):
+        self.agent = agent
+        self.name = agent.name
 
     def complete(self, prompt: str) -> str:
-        payload = json.dumps({
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
-        }).encode()
-        request = urllib.request.Request(
-            self.endpoint + "/chat/completions", data=payload,
-            headers={"Content-Type": "application/json", **(
-                {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {})},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=180) as response:
-            data = json.loads(response.read().decode())
-        return data["choices"][0]["message"]["content"]
+        return self.agent.complete(prompt)
 
 
 WEB_SEARCHES: dict[str, type[WebSearch]] = {
     "duckduckgo": DuckDuckGoWebSearch,
-}
-MODELS: dict[str, type[RemoteModel]] = {
-    "pi-cli": PiCLIModel,
-    "openai-compatible": OpenAICompatibleModel,
 }
 
 
@@ -281,8 +248,7 @@ def research(repo: repo_mod.Repo, question: str, local_context: str = "",
             "Ajuste privacy.extra_patterns ou remova o trecho."))
     if web is None or model is None:
         return ResearchResult(ok=False, error=(
-            "pesquisa externa sem provedor configurado "
-            "(research.search_provider + research.model_endpoint). "
+            "pesquisa externa sem agente configurado ([llm.research]). "
             "Pergunta preservada; configure e repita."))
     try:
         results = web.search(question)
@@ -355,26 +321,29 @@ class ClaudeAgent:
     name = "claude-cli"
 
     def __init__(self, binary: str = "claude", model: str = "",
-                 max_budget_usd: float = 0, cwd: str | None = None):
+                 max_budget_usd: float = 0, cwd: str | None = None,
+                 extra_instructions: str = ""):
         self.binary = binary
         self.model = model
         self.max_budget_usd = max_budget_usd
         self.cwd = cwd
+        self.extra_instructions = extra_instructions
 
     def run(self, question: str, local_context: str):
         from . import claude_cli
 
         return claude_cli.research(
             question, local_context, binary=self.binary, model=self.model,
-            cwd=self.cwd, max_budget_usd=self.max_budget_usd)
+            cwd=self.cwd, max_budget_usd=self.max_budget_usd,
+            extra_instructions=self.extra_instructions)
 
 
 def research_agent(repo: repo_mod.Repo, question: str, local_context: str = "",
                    agent: ClaudeAgent | None = None,
                    extra_patterns: list[str] | None = None) -> ResearchResult:
     """Pesquisa por agente. Mesmos bloqueios de entrada do research(); na
-    saída, segredo também bloqueia, porque o agente lê Remnic e arquivos e o
-    rascunho vai para o Git."""
+    saída, segredo também bloqueia, porque o agente lê arquivos e outras
+    fontes de contexto e o rascunho vai para o Git."""
     redacted_q = scan(question, extra_patterns)
     if redacted_q.found:
         return ResearchResult(ok=False, blocked=(

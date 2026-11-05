@@ -11,7 +11,7 @@ import pytest
 from lore import repo as repo_mod
 from lore.models import parse_doc
 from lore.research import (
-    PiCLIModel,
+    AgentModel,
     RemoteModel,
     ResearchResult,
     Source,
@@ -67,17 +67,20 @@ def repo(tmp_path, monkeypatch):
     return repo_mod.Repo(root)
 
 
-def test_pi_cli_research_model_uses_pi_adapter(monkeypatch):
+def test_agent_model_delegates_to_agent():
     calls = []
 
-    def fake_complete(prompt, *, binary, model):
-        calls.append((prompt, binary, model))
-        return "Resposta provisória."
+    class FakeAgent:
+        name = "fake"
 
-    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
-    result = PiCLIModel(model="openai/example", binary="/usr/bin/pi").complete("dados")
-    assert result == "Resposta provisória."
-    assert calls == [("dados", "/usr/bin/pi", "openai/example")]
+        def complete(self, prompt):
+            calls.append(prompt)
+            return "Resposta provisória."
+
+    model = AgentModel(FakeAgent())
+    assert model.name == "fake"
+    assert model.complete("dados") == "Resposta provisória."
+    assert calls == ["dados"]
 
 
 def test_research_creates_valid_draft(repo):
@@ -226,20 +229,20 @@ def test_fetch_page_truncates(monkeypatch):
     assert len(text.encode()) <= 50_000 + 100
 
 
-def test_cli_research_uses_pi_cli_without_endpoint(repo, monkeypatch, capsys):
+def test_cli_research_web_mode_uses_default_pi_agent(repo, monkeypatch, capsys):
     from lore.cli import main
 
     with open(os.path.join(repo.root, ".lore", "config.toml"), "w",
               encoding="utf-8") as handle:
-        handle.write('[research]\nenabled = true\nmodel_provider = "pi-cli"\n')
+        handle.write('[research]\nenabled = true\n')
     monkeypatch.setattr("lore.research.DuckDuckGoWebSearch.search", lambda *a, **k: [])
     calls = []
 
-    def fake_complete(prompt, *, binary, model):
-        calls.append((prompt, binary, model))
+    def fake_complete(self, prompt, system=""):
+        calls.append((prompt, self.binary, self.model))
         return "Pesquisa inconclusiva, sem fonte aproveitável."
 
-    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
+    monkeypatch.setattr("lore.agents.Agent.complete", fake_complete)
     assert main(["--root", repo.root, "ask", "pergunta desconhecida", "--yes"]) == 0
     assert calls and "Passagens web:" in calls[0][0]
     assert calls[0][1:] == ("pi", "")
@@ -255,16 +258,16 @@ def test_cli_research_without_confirmation_runs_automatically(
               encoding="utf-8") as handle:
         handle.write(
             '[research]\nenabled = true\nrequire_confirmation = false\n'
-            'model_provider = "pi-cli"\n'
+            ''
         )
     monkeypatch.setattr("lore.research.DuckDuckGoWebSearch.search", lambda *a, **k: [])
     calls = []
 
-    def fake_complete(prompt, *, binary, model):
+    def fake_complete(self, prompt, system=""):
         calls.append(prompt)
         return "Resposta automática provisória."
 
-    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
+    monkeypatch.setattr("lore.agents.Agent.complete", fake_complete)
     assert main(["--root", repo.root, "ask", "mensagens dos ultimos commits"]) == 0
     assert calls
     assert "não verificada" in capsys.readouterr().out
@@ -286,16 +289,16 @@ def test_cli_partial_research_sends_local_chunk(repo, monkeypatch, capsys):
         handle.write(verified)
     with open(os.path.join(repo.root, ".lore", "config.toml"), "w",
               encoding="utf-8") as handle:
-        handle.write('[research]\nenabled = true\nmodel_provider = "pi-cli"\n')
+        handle.write('[research]\nenabled = true\n')
     index_mod.build(repo)
     monkeypatch.setattr("lore.research.DuckDuckGoWebSearch.search", lambda *a, **k: [])
     prompts = []
 
-    def fake_complete(prompt, *, binary, model):
+    def fake_complete(self, prompt, system=""):
         prompts.append(prompt)
         return "Resposta provisória sobre assinatura dos commits."
 
-    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
+    monkeypatch.setattr("lore.agents.Agent.complete", fake_complete)
     assert main([
         "--root", repo.root, "ask", "mensagens e assinatura dos commits", "--yes"
     ]) == 0
@@ -312,10 +315,10 @@ def test_cli_json_yes_runs_research_and_returns_draft(repo, monkeypatch, capsys)
 
     with open(os.path.join(repo.root, ".lore", "config.toml"), "w",
               encoding="utf-8") as handle:
-        handle.write('[research]\nenabled = true\nmodel_provider = "pi-cli"\n')
+        handle.write('[research]\nenabled = true\n')
     monkeypatch.setattr("lore.research.DuckDuckGoWebSearch.search", lambda *a, **k: [])
     monkeypatch.setattr(
-        "lore.pi_cli.complete",
+        "lore.agents.Agent.complete",
         lambda *a, **k: "Use `git log --format=%s` para ver mensagens.",
     )
 
@@ -488,8 +491,9 @@ def test_cli_claude_provider_uses_agent(repo, monkeypatch, capsys):
 
     with open(os.path.join(repo.root, ".lore", "config.toml"), "w",
               encoding="utf-8") as handle:
-        handle.write('[research]\nenabled = true\nmodel_provider = "claude-cli"\n'
-                     'claude_model = "claude-sonnet-5-5"\nmax_budget_usd = 2\n')
+        handle.write('[research]\nenabled = true\nmode = "agent"\nmax_budget_usd = 2\n'
+                     'extra_instructions = "consulte meu-cli"\n'
+                     '[llm.research]\nagent = "claude"\nmodel = "claude-sonnet-5-5"\n')
     calls = []
 
     def fake_research(question, local_context="", **kwargs):
@@ -505,4 +509,5 @@ def test_cli_claude_provider_uses_agent(repo, monkeypatch, capsys):
     assert payload["research"]["ok"] is True
     assert "Resposta do Claude." in payload["research"]["answer"]
     assert calls == [{"binary": "claude", "model": "claude-sonnet-5-5",
-                      "cwd": repo.root, "max_budget_usd": 2.0}]
+                      "cwd": repo.root, "max_budget_usd": 2.0,
+                      "extra_instructions": "consulte meu-cli"}]

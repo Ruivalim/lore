@@ -7,11 +7,9 @@ avisa em stale, preserva comandos byte a byte, não esconde conflito.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import sqlite3
-import urllib.request
 from dataclasses import dataclass, field
 
 from . import config as config_mod
@@ -140,41 +138,21 @@ def _full_chunk_text(repo: repo_mod.Repo, hit: Hit) -> str:
     return hit.snippet
 
 
-def synthesize_local(endpoint: str, question: str,
-                     context: list[tuple[str, str]], api_key: str = "",
-                     model: str = "local", backend: str = "openai-compatible",
-                     pi_binary: str = "pi", pi_model: str = "") -> str:
-    """Chama endpoint OpenAI-compatible (stdlib). Levanta em falha."""
+def synthesis_prompt(question: str, context: list[tuple[str, str]]) -> str:
     blocks = "\n\n".join(
         f"[fonte: {citation}]\n{text}" for citation, text in context
     )
-    prompt = (
+    return (
         "Responda à pergunta usando SOMENTE os trechos abaixo. "
         "Cite cada afirmação como arquivo#seção entre colchetes. "
         "Não invente comandos nem valores.\n\n"
         f"Pergunta: {question}\n\nTrechos:\n{blocks}\n"
     )
-    if backend == "pi-cli":
-        from .pi_cli import complete
 
-        return complete(prompt, binary=pi_binary, model=pi_model)
-    if backend != "openai-compatible":
-        raise ValueError(f"backend de síntese desconhecido: {backend}")
-    payload = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-    }).encode()
-    request = urllib.request.Request(
-        endpoint.rstrip("/") + "/chat/completions",
-        data=payload,
-        headers={"Content-Type": "application/json", **(
-            {"Authorization": f"Bearer {api_key}"} if api_key else {})},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        data = json.loads(response.read().decode())
-    return data["choices"][0]["message"]["content"]
+
+def synthesize(agent, question: str, context: list[tuple[str, str]]) -> str:
+    """Síntese pelo agente da tarefa answer. Levanta em falha."""
+    return agent.complete(synthesis_prompt(question, context))
 
 
 def validate_synthesis(response: str, citations: list[str]) -> list[str]:
@@ -190,7 +168,8 @@ def validate_synthesis(response: str, citations: list[str]) -> list[str]:
         if os.path.basename(path) not in known_basenames
     }
     errors = [f"arquivo citado não está nas fontes: {path}" for path in sorted(invented)]
-    cited = sum(1 for cite in citations if cite in response or cite.split("#")[0] in response)
+    # Citar só o nome do arquivo vale: a checagem de inventado já é por nome.
+    cited = len({os.path.basename(path) for path in mentioned} & known_basenames)
     if cited == 0:
         errors.append("resposta sem nenhuma citação às fontes")
     return errors
@@ -265,35 +244,28 @@ def ask(repo: repo_mod.Repo, question: str, limit: int = TOP_CHUNKS,
                        "conteúdo pode estar desatualizado")
         warning = f"{warning}; {stale_note}" if warning else stale_note
     if not extractive:
+        from . import agents as agents_mod
+
         cfg, _ = config_mod.load(repo.root)
-        answer_cfg = cfg.get("answer", {})
-        pi_cfg = cfg.get("pi", {})
-        endpoint = answer_cfg.get("local_model_endpoint", "")
-        backend = answer_cfg.get(
-            "backend", "openai-compatible" if endpoint else "pi-cli")
-        if backend == "pi-cli" or (backend == "openai-compatible" and endpoint):
+        try:
+            agent = agents_mod.resolve(cfg, "answer")
+        except ValueError as exc:
+            agent = None
+            warning = f"{warning}; {exc}" if warning else str(exc)
+        if agent is not None:
             context = [(cite(hit), _full_chunk_text(repo, hit)) for hit in hits[:3]]
             try:
-                response = synthesize_local(
-                    endpoint, question, context,
-                    os.environ.get("LORE_API_KEY", ""),
-                    answer_cfg.get("local_model", "local"),
-                backend=backend,
-                pi_binary=answer_cfg.get(
-                    "pi_binary", pi_cfg.get("binary", "pi")),
-                pi_model=answer_cfg.get(
-                    "pi_model", pi_cfg.get("model", "")))
+                response = synthesize(agent, question, context)
             except Exception as exc:  # noqa: BLE001 - fallback é o contrato
-                warning = f"síntese local falhou ({exc}); usando modo extrativo"
+                warning = f"síntese com {agent.name} falhou ({exc}); usando modo extrativo"
             else:
                 citations = [cite(hit) for hit in hits[:3]]
                 errors = validate_synthesis(response, citations)
                 if not errors:
                     return Answer(coverage=coverage, text=response.strip() + "\n",
                                   citations=citations, warning=warning)
-                warning = ("síntese local sem citação válida "
+                warning = (f"síntese com {agent.name} sem citação válida "
                            f"({'; '.join(errors)}); usando modo extrativo")
-        # Sem endpoint: extrativo silencioso (ninguém pediu síntese).
     answer = compose_extractive(hits, warning)
     answer.coverage = coverage
     return answer

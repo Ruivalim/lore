@@ -23,8 +23,8 @@ def test_import_uses_pi_metadata_and_preserves_body(repo, tmp_path, monkeypatch)
     source.write_text(original, encoding="utf-8")
     calls = []
 
-    def fake_complete(prompt, *, binary, model):
-        calls.append((prompt, binary, model))
+    def fake_complete(self, prompt, system=""):
+        calls.append((prompt, self.binary, self.model))
         return json.dumps(
             {
                 "title": "Split DNS com WireGuard",
@@ -33,12 +33,13 @@ def test_import_uses_pi_metadata_and_preserves_body(repo, tmp_path, monkeypatch)
             }
         )
 
-    monkeypatch.setattr("lore.importer.complete", fake_complete)
+    monkeypatch.setattr("lore.agents.Agent.complete", fake_complete)
     result = import_markdown(
         repo,
         str(source),
         {
-            "pi": {"binary": "/usr/bin/pi", "model": "deepseek/example"},
+            "llm": {"model": "deepseek/example"},
+            "agents": {"pi": {"binary": "/usr/bin/pi"}},
             "privacy": {"extra_patterns": []},
         },
     )
@@ -59,7 +60,7 @@ def test_import_blocks_secret_before_pi(repo, tmp_path, monkeypatch):
     source = tmp_path / "secret.md"
     source.write_text("# Key\n\nToken: ghp_abcdefghij12345678901234567890\n")
     monkeypatch.setattr(
-        "lore.importer.complete",
+        "lore.agents.Agent.complete",
         lambda *a, **k: pytest.fail("Pi must not receive detected secrets"),
     )
     with pytest.raises(ValueError, match="bloqueada"):
@@ -70,7 +71,7 @@ def test_import_blocks_secret_before_pi(repo, tmp_path, monkeypatch):
 def test_import_rejects_bad_pi_metadata_without_writing(repo, tmp_path, monkeypatch):
     source = tmp_path / "note.md"
     source.write_text("# A note\n\nBody.\n")
-    monkeypatch.setattr("lore.importer.complete", lambda *a, **k: "not json")
+    monkeypatch.setattr("lore.agents.Agent.complete", lambda *a, **k: "not json")
     with pytest.raises(ValueError, match="JSON"):
         import_markdown(repo, str(source), {})
     assert os.listdir(repo.managed_dir(repo_mod.DRAFTS)) == []
@@ -82,7 +83,7 @@ def test_cli_import_emits_json_draft(repo, tmp_path, monkeypatch, capsys):
     source = tmp_path / "cli.md"
     source.write_text("# CLI import\n\nConteúdo.\n", encoding="utf-8")
     monkeypatch.setattr(
-        "lore.importer.complete",
+        "lore.agents.Agent.complete",
         lambda *a, **k: '{"title":"CLI import","type":"note","tags":["cli"]}',
     )
 
@@ -96,7 +97,7 @@ def test_import_suffixes_duplicate_ids(repo, tmp_path, monkeypatch):
     source = tmp_path / "one.md"
     source.write_text("# A note\n\nBody.\n")
     monkeypatch.setattr(
-        "lore.importer.complete",
+        "lore.agents.Agent.complete",
         lambda *a, **k: '{"title":"Same title","type":"note","tags":["one"]}',
     )
     first = import_markdown(repo, str(source), {})

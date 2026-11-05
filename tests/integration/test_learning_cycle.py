@@ -16,14 +16,14 @@ def test_cli_learning_cycle_uses_global_repo(tmp_path, monkeypatch, capsys):
     (root / ".lore" / "config.toml").write_text(
         '[retrieval]\nsemantic = false\n\n[research]\nenabled = true\n'
         'require_confirmation = true\nsearch_provider = "duckduckgo"\n'
-        'model_provider = "pi-cli"\n',
+        '',
         encoding="utf-8",
     )
     config_home = tmp_path / "config"
     global_path = config_home / "lore" / "config.yaml"
     global_path.parent.mkdir(parents=True)
     global_path.write_text(
-        f'repository:\n  root: "{root}"\npi:\n  binary: pi\n  model: test/model\n',
+        f'repository:\n  root: "{root}"\nllm:\n  agent: pi\n  model: test/model\n',
         encoding="utf-8",
     )
     outside = tmp_path / "outside"
@@ -50,15 +50,15 @@ def test_cli_learning_cycle_uses_global_repo(tmp_path, monkeypatch, capsys):
     )
     model_calls = []
 
-    def fake_complete(prompt, *, binary, model):
-        model_calls.append((prompt, binary, model))
+    def fake_complete(self, prompt, system=""):
+        model_calls.append((prompt, self.binary, self.model))
         return (
             "RESPOSTA provisória: use `git log --format=%s`.\n\n"
             "CITAÇÕES: git-log Documentation.\n\n"
             "CONCLUSÕES DO MODELO: nenhuma.\n\nINCERTEZAS: nenhuma."
         )
 
-    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
+    monkeypatch.setattr("lore.agents.Agent.complete", fake_complete)
 
     assert main(["ask", QUESTION, "--yes"]) == 0
     first_output = capsys.readouterr().out

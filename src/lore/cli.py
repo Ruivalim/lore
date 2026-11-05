@@ -261,15 +261,10 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
     if not args.pergunta:
         return open_tui(args, repo)
     if args.yes:
-        from . import config as config_mod
-
         cfg, _ = config_mod.load(repo.root)
-        research = cfg.get("research", {})
-        provider = research.get("model_provider", "pi-cli")
-        if (not research.get("enabled")
-                or provider not in PROVIDERS
-                or (provider == "openai-compatible" and not research.get("model_endpoint"))):
-            return _err("--yes exige pesquisa habilitada e backend de modelo configurado", args.json)
+        problem = _research_problem(cfg)
+        if problem:
+            return _err(f"--yes exige pesquisa utilizável: {problem}", args.json)
     if args.as_of and not re.match(r"^\d{4}-\d{2}-\d{2}$", args.as_of):
         return _err("--as-of exige data YYYY-MM-DD", args.json)
     answer = run_ask(
@@ -311,15 +306,37 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
     return 0
 
 
-PROVIDERS = ("pi-cli", "openai-compatible", "claude-cli")
+RESEARCH_MODES = ("web", "agent")
+# Agentes que pesquisam sozinhos (web + base). Os demais só redigem no modo web.
+RESEARCH_AGENTS = ("claude",)
+
+
+def _research_problem(cfg: dict) -> str:
+    """Motivo pelo qual a pesquisa não pode rodar, ou '' se pode."""
+    from . import agents as agents_mod
+
+    rcfg = cfg.get("research", {})
+    if not rcfg.get("enabled"):
+        return "research.enabled = false"
+    mode = rcfg.get("mode", "web")
+    if mode not in RESEARCH_MODES:
+        return f"research.mode desconhecido ({mode}); use web ou agent"
+    try:
+        agent = agents_mod.resolve(cfg, "research")
+    except ValueError as exc:
+        return str(exc)
+    if mode == "agent" and agent.name not in RESEARCH_AGENTS:
+        return (f"research.mode = agent só funciona com {', '.join(RESEARCH_AGENTS)} "
+                f"(agente de research: {agent.name})")
+    return ""
 
 
 def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
+    from . import agents as agents_mod
     from .research import (
-        ClaudeAgent,
-        OpenAICompatibleModel,
-        PiCLIModel,
         WEB_SEARCHES,
+        AgentModel,
+        ClaudeAgent,
         research,
         research_agent,
     )
@@ -328,19 +345,13 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
     rcfg = cfg.get("research", {})
     if not rcfg.get("enabled"):
         return 0, None, False
-    endpoint = rcfg.get("model_endpoint", "")
-    provider = rcfg.get("model_provider", "pi-cli")
-    pi_cfg = cfg.get("pi", {})
-    if provider == "openai-compatible" and not endpoint:
-        message = "pesquisa habilitada mas sem model_endpoint; pergunta preservada."
+    problem = _research_problem(cfg)
+    if problem:
+        message = f"pesquisa indisponível ({problem}); pergunta preservada."
         if not args.json:
             print(message)
         return 1, {"ok": False, "error": message}, False
-    if provider not in PROVIDERS:
-        message = f"backend de pesquisa desconhecido ({provider}); pergunta preservada."
-        if not args.json:
-            print(message)
-        return 1, {"ok": False, "error": message}, False
+    agent = agents_mod.resolve(cfg, "research")
     confirmed = args.yes or not rcfg.get("require_confirmation", True)
     if not confirmed and args.json:
         message = "--json não pergunta; use --yes para pesquisar externamente."
@@ -356,33 +367,24 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
         f"[fonte local: {citation}]\n{text}"
         for citation, text in answer.context[:3]
     )
-    if provider == "claude-cli":
+    if rcfg.get("mode", "web") == "agent":
         if not args.json:
-            print("Pesquisando com Claude (web, base Lore e Remnic)…", flush=True)
-        agent = ClaudeAgent(
-            binary=rcfg.get("claude_binary", "claude"),
-            model=rcfg.get("claude_model", ""),
+            print(f"Pesquisando com {agent.name} (web e base Lore)…", flush=True)
+        researcher = ClaudeAgent(
+            binary=agent.binary or "claude",
+            model=agent.model,
             max_budget_usd=float(rcfg.get("max_budget_usd", 0) or 0),
             cwd=repo.root,
+            extra_instructions=str(rcfg.get("extra_instructions", "") or ""),
         )
-        result = research_agent(repo, question, local_context, agent=agent,
-                                extra_patterns=rcfg.get("extra_patterns", []))
+        result = research_agent(repo, question, local_context, agent=researcher,
+                                extra_patterns=cfg.get("privacy", {}).get("extra_patterns", []))
     else:
         web_cls = WEB_SEARCHES.get(rcfg.get("search_provider", "duckduckgo"),
                                    WEB_SEARCHES["duckduckgo"])
-        if provider == "pi-cli":
-            model = PiCLIModel(
-                model=rcfg.get("pi_model", pi_cfg.get("model", "")),
-                binary=rcfg.get("pi_binary", pi_cfg.get("binary", "pi")),
-            )
-        else:
-            model = OpenAICompatibleModel(
-                endpoint,
-                rcfg.get("model_name", "lore-remote"),
-                os.environ.get("LORE_REMOTE_API_KEY", ""),
-            )
-        result = research(repo, question, local_context, web=web_cls(), model=model,
-                          extra_patterns=rcfg.get("extra_patterns", []))
+        result = research(repo, question, local_context, web=web_cls(),
+                          model=AgentModel(agent),
+                          extra_patterns=cfg.get("privacy", {}).get("extra_patterns", []))
     result_payload = {
         "ok": result.ok,
         "answer": result.answer,
@@ -520,12 +522,50 @@ def _check_links(repo: repo_mod.Repo, docs: list) -> list[str]:
     return problems
 
 
-def run_doctor(repo: repo_mod.Repo) -> tuple[list[str], list[str]]:
+def _check_agents(cfg: dict, probe: bool) -> tuple[list[str], list[str]]:
+    """Agente de cada tarefa: definição válida, binário no PATH e, com probe,
+    uma chamada real (CLI que sai 0 com erro só se pega chamando)."""
+    from . import agents as agents_mod
+
+    problems: list[str] = []
+    warnings: list[str] = []
+    seen: dict[tuple[str, str], str] = {}
+    research_on = bool(cfg.get("research", {}).get("enabled"))
+    for task in agents_mod.TASKS:
+        if task == "research" and not research_on:
+            continue
+        try:
+            agent = agents_mod.resolve(cfg, task)
+        except ValueError as exc:
+            problems.append(f"llm.{task}: {exc}")
+            continue
+        label = agent.name + (f" ({agent.model})" if agent.model else "")
+        key = (agent.name, agent.model)
+        if key in seen:
+            continue
+        seen[key] = task
+        if agent.kind == "cli" and not shutil.which(agent.executable()):
+            warnings.append(f"llm.{task}: binário de {label} não encontrado no PATH")
+            continue
+        if probe:
+            try:
+                agent.complete("Responda apenas: ok")
+            except agents_mod.AgentError as exc:
+                problems.append(f"llm.{task}: {label} não respondeu ({exc})")
+    return problems, warnings
+
+
+def run_doctor(repo: repo_mod.Repo, probe: bool = False) -> tuple[list[str], list[str]]:
     """Retorna (problemas, avisos)."""
     problems: list[str] = []
     warnings: list[str] = []
     cfg, cfg_errors = config_mod.load(repo.root)
     problems.extend(f"config: {err}" for err in cfg_errors)
+    warnings.extend(f"config: chave desconhecida, ignorada: {item}"
+                    for item in config_mod.config_warnings(repo.root))
+    agent_problems, agent_warnings = _check_agents(cfg, probe)
+    problems.extend(agent_problems)
+    warnings.extend(agent_warnings)
 
     docs = repo_mod.load_all(repo)
     for doc in docs:
@@ -567,7 +607,7 @@ def run_doctor(repo: repo_mod.Repo) -> tuple[list[str], list[str]]:
 
 
 def cmd_doctor(args, repo: repo_mod.Repo) -> int:
-    problems, warnings = run_doctor(repo)
+    problems, warnings = run_doctor(repo, probe=args.probe)
     if args.json:
         _out(
             {"ok": not problems, "problems": problems, "warnings": warnings},
@@ -658,7 +698,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_add.add_argument("--move", action="store_true")
     p_add.set_defaults(func=cmd_add)
 
-    p_import = sub.add_parser("import", help="importar Markdown com metadados sugeridos pelo Pi")
+    p_import = sub.add_parser("import", help="importar Markdown com metadados sugeridos pelo agente")
     p_import.add_argument("arquivo")
     p_import.set_defaults(func=cmd_import)
 
@@ -701,6 +741,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_edit.set_defaults(func=cmd_edit)
 
     p_doctor = sub.add_parser("doctor", help="diagnosticar repositório")
+    p_doctor.add_argument("--probe", action="store_true",
+                          help="chama cada agente configurado com um prompt mínimo")
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_config = sub.add_parser("config", help="ver ou iniciar configuração")

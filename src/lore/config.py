@@ -7,89 +7,25 @@ import tomllib
 
 import yaml
 
-DEFAULTS: dict = {
-    "repository": {
-        "root": "",
-        "knowledge_dir": "knowledge",
-        "drafts_dir": "drafts",
-        "archive_dir": "archive",
-    },
-    "retrieval": {
-        "lexical": True,
-        "semantic": False,
-        "lex_weight": 0.7,
-        "sem_weight": 0.3,
-    },
-    "answer": {"mode": "local-first", "allow_extractive_fallback": True},
-    "research": {"enabled": False, "require_confirmation": True,
-                 "confirm_timeout": 5},
-    "privacy": {
-        "redact_secrets": True,
-        "send_full_documents": False,
-    },
-    "git": {"auto_commit": False},
-    "pi": {"binary": "pi", "model": ""},
-}
+EXAMPLE_PATH = os.path.join(os.path.dirname(__file__), "config.example.toml")
 
-CONFIG_TEMPLATE = """\
-[repository]
-knowledge_dir = "knowledge"
-drafts_dir = "drafts"
-archive_dir = "archive"
+with open(EXAMPLE_PATH, encoding="utf-8") as _handle:
+    CONFIG_TEMPLATE = _handle.read()
 
-[retrieval]
-lexical = true
-semantic = false
-# embedding_backend = "hash"  # hash | endpoint
-# embedding_endpoint = ""
-# embedding_model = ""
-lex_weight = 0.7
-sem_weight = 0.3
+# O exemplo é a fonte dos defaults: opção nova entra lá, não aqui.
+DEFAULTS: dict = tomllib.loads(CONFIG_TEMPLATE)
 
-[answer]
-mode = "local-first"
-backend = "pi-cli"  # pi-cli | openai-compatible
-pi_binary = "pi"
-# pi_model = "provider/model-id"  # vazio usa o modelo global do Pi
-# local_model_endpoint = "http://localhost:11434/v1"  # backend legado
-# local_model = "local-model"
-allow_extractive_fallback = true
-
-[research]
-enabled = false
-require_confirmation = true
-# Sem tecla em N segundos, pesquisa sozinho. 0 espera para sempre.
-confirm_timeout = 5
-# search_provider = "duckduckgo"
-model_provider = "pi-cli"  # pi-cli | openai-compatible | claude-cli
-pi_binary = "pi"
-# claude-cli: Claude Code headless pesquisa sozinho (web, lore, Remnic).
-# claude_model = "claude-opus-5-5"
-# max_budget_usd = 2  # teto por pesquisa; 0 sem teto
-# pi_model = "provider/model-id"  # vazio usa o modelo global do Pi
-# model_endpoint = "http://localhost:11434/v1"  # backend legado
-# model_name = "local-model"
-# extra_patterns = []
-
-[privacy]
-redact_secrets = true
-send_full_documents = false
-
-[git]
-# Commit automático dos paths que cada comando tocou + push oportunista.
-# Nunca faz pull/rebase/force push; reconciliação fica no script lore-sync.
-auto_commit = false
-"""
+LLM_TASKS = ("answer", "import", "research")
+LLM_TASK_KEYS = ("agent", "model")
 
 GLOBAL_CONFIG_TEMPLATE = """\
 # Acervo usado quando o comando roda fora de um repositório Lore.
 repository:
   root: ""
 
-# Modelo usado pelas chamadas não interativas de Lore ao Pi.
-# Vazio usa o modelo padrão configurado no próprio Pi.
-pi:
-  binary: pi
+# Agente de linguagem padrão; todas as opções em config.example.toml.
+llm:
+  agent: pi
   model: ""
 """
 
@@ -125,6 +61,59 @@ def global_repository_root() -> str:
     if not isinstance(root, str) or not root.strip():
         return ""
     return os.path.abspath(os.path.expanduser(root.strip()))
+
+
+def unknown_keys(raw: dict, origin: str) -> list[str]:
+    """Chaves que o Lore não lê. Vira aviso no doctor, nunca erro."""
+    found: list[str] = []
+    for section, values in raw.items():
+        if section == "agents":
+            if not isinstance(values, dict):
+                found.append(f"{origin}: [agents] deve ser uma tabela")
+                continue
+            from .agents import FIELDS
+
+            for name, spec in values.items():
+                if not isinstance(spec, dict):
+                    found.append(f"{origin}: [agents.{name}] deve ser uma tabela")
+                    continue
+                found.extend(f"{origin}: agents.{name}.{key}"
+                             for key in spec if key not in FIELDS)
+            continue
+        if section not in DEFAULTS:
+            found.append(f"{origin}: [{section}]")
+            continue
+        if not isinstance(values, dict):
+            found.append(f"{origin}: {section} deve ser uma tabela")
+            continue
+        for key, value in values.items():
+            if section == "llm" and key in LLM_TASKS:
+                if not isinstance(value, dict):
+                    found.append(f"{origin}: llm.{key} deve ser uma tabela")
+                    continue
+                found.extend(f"{origin}: llm.{key}.{sub}"
+                             for sub in value if sub not in LLM_TASK_KEYS)
+                continue
+            if key not in DEFAULTS[section]:
+                found.append(f"{origin}: {section}.{key}")
+    return found
+
+
+def config_warnings(root: str) -> list[str]:
+    """Chaves desconhecidas no YAML global e no TOML do acervo."""
+    warnings: list[str] = []
+    global_raw, errors = _load_global()
+    if not errors:
+        warnings.extend(unknown_keys(global_raw, "config global"))
+    project_path = os.path.join(root, ".lore", "config.toml")
+    if os.path.isfile(project_path):
+        try:
+            with open(project_path, "rb") as handle:
+                project_raw = tomllib.load(handle)
+        except (tomllib.TOMLDecodeError, OSError):
+            project_raw = {}
+        warnings.extend(unknown_keys(project_raw, ".lore/config.toml"))
+    return warnings
 
 
 def _merge(base: dict, override: dict) -> dict:

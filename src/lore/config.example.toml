@@ -1,0 +1,84 @@
+# Configuração do Lore: todas as opções, com o valor padrão.
+#
+# Este arquivo é a fonte dos defaults: o que não aparecer na sua config vale
+# como está aqui. `lore init` e `lore config --init` copiam ele para
+# <acervo>/.lore/config.toml. As mesmas chaves também valem no YAML global
+# (~/.config/lore/config.yaml), que é lido antes; o TOML do acervo ganha.
+# Chave que não existe aqui é ignorada e o `lore doctor` avisa.
+
+[repository]
+# Só no YAML global: acervo usado quando o comando roda fora de um.
+# Precedência da raiz: --root, acervo ancestral do diretório atual, este valor.
+root = ""
+
+# Agente de linguagem por tarefa. Agente é um preset (pi, claude, codex, agy,
+# openai) ou um nome definido em [agents.<nome>].
+[llm]
+agent = "pi"
+# Vazio usa o modelo padrão do próprio agente. Formato depende do agente:
+# pi usa provider/model-id, claude usa claude-opus-5-5, agy usa gemini-3.8-flash-low.
+model = ""
+
+# Sobrescreve agente e modelo por tarefa. `model` do [llm] só é herdado quando
+# a tarefa usa o mesmo agente do [llm].
+# [llm.answer]      # síntese do `lore ask`
+# agent = "codex"
+# [llm.import]      # título, tipo, tags e resumo no `lore import`
+# agent = "pi"
+# model = "provider/model-id"
+# [llm.research]    # pesquisa externa
+# agent = "claude"
+# model = "claude-opus-5-5"
+
+# Ajuste de preset ou CLI novo. Campos: kind (cli | openai), binary, command,
+# model_args, prompt (stdin | arg), max_arg_bytes, error_patterns, timeout,
+# endpoint, api_key_env. Placeholders em command: {binary} {model} {prompt}
+# {system} {output_file}, e o elemento "{model_args}" inteiro.
+# [agents.pi]
+# binary = "/caminho/para/pi"
+# timeout = 300
+#
+# [agents.ollama]   # qualquer endpoint OpenAI-compatível
+# kind = "openai"
+# endpoint = "http://localhost:11434/v1"
+# api_key_env = "LORE_API_KEY"
+#
+# [agents.meu-cli]  # qualquer CLI que lê prompt e escreve texto
+# command = ["meu-cli", "--quiet", "{model_args}"]
+# model_args = ["--model", "{model}"]
+# prompt = "stdin"
+# error_patterns = ["^Error:"]
+
+[retrieval]
+semantic = false
+# hash (local, sem modelo) | endpoint (OpenAI-compatível /embeddings)
+embedding_backend = "hash"
+embedding_endpoint = ""
+embedding_model = ""
+lex_weight = 0.7
+sem_weight = 0.3
+
+[research]
+enabled = false
+require_confirmation = true
+# Sem tecla em N segundos, pesquisa sozinho. 0 espera para sempre.
+confirm_timeout = 5
+# web: Lore busca e baixa as páginas, o agente de [llm.research] só redige.
+# agent: o próprio agente pesquisa na web e na base (hoje só claude).
+mode = "web"
+# Busca usada no modo web.
+search_provider = "duckduckgo"
+# Modo agent: teto de gasto por pesquisa em dólar, 0 sem teto.
+max_budget_usd = 0
+# Modo agent: instruções suas somadas ao prompt do pesquisador, por exemplo
+# outra fonte de contexto que ele pode consultar.
+extra_instructions = ""
+
+[privacy]
+# Regex a mais tratadas como segredo: bloqueiam envio a agente e rascunho.
+extra_patterns = []
+
+[git]
+# Commit dos arquivos que cada comando tocou, mais push se houver upstream.
+# Nunca faz pull, rebase nem force push.
+auto_commit = false

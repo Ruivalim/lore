@@ -126,6 +126,17 @@ def test_validate_synthesis_rejects_invented_file():
     assert validate_synthesis("Resposta sem fonte.", citations)
 
 
+def test_validate_synthesis_accepts_basename_and_relative_citations():
+    """Codex cita [a.md#Seção]: é a fonte certa, não pode cair no extrativo."""
+    citations = ["/abs/acervo/knowledge/a.md#Seção"]
+    assert validate_synthesis("Use x [a.md#Seção].", citations) == []
+    assert validate_synthesis("Use x [knowledge/a.md#Seção].", citations) == []
+    # Nome de outro arquivo continua inventado, e só ele não vale como citação.
+    errors = validate_synthesis("Use x [b.md#Seção].", citations)
+    assert any("b.md" in err for err in errors)
+    assert any("sem nenhuma citação" in err for err in errors)
+
+
 class _Handler(BaseHTTPRequestHandler):
     body = b"{}"
 
@@ -160,8 +171,8 @@ def test_synthesis_used_when_valid(repo, tmp_path, fake_llm):
     cfg = os.path.join(repo.root, ".lore", "config.toml")
     with open(cfg, "a", encoding="utf-8") as handle:
         handle.write(
-            "\n[answer]\n"
-            f'local_model_endpoint = "http://127.0.0.1:{fake_llm.server_port}"\n'
+            '\n[llm]\nagent = "local"\n[agents.local]\nkind = "openai"\n'
+            f'endpoint = "http://127.0.0.1:{fake_llm.server_port}"\n'
         )
     # Invalida índice? Não: config não entra no hash. Rebuild desnecessário.
     answer = ask(repo, "split DNS WireGuard", extractive=False)
@@ -173,26 +184,26 @@ def test_synthesis_falls_back_on_bad_citation(repo, fake_llm):
     cfg = os.path.join(repo.root, ".lore", "config.toml")
     with open(cfg, "a", encoding="utf-8") as handle:
         handle.write(
-            "\n[answer]\n"
-            f'local_model_endpoint = "http://127.0.0.1:{fake_llm.server_port}"\n'
+            '\n[llm]\nagent = "local"\n[agents.local]\nkind = "openai"\n'
+            f'endpoint = "http://127.0.0.1:{fake_llm.server_port}"\n'
         )
     answer = ask(repo, "split DNS WireGuard", extractive=False)
     assert "Fontes locais:" in answer.text
     assert "extrativo" in answer.text
 
 
-def test_synthesis_uses_pi_cli_backend(repo, monkeypatch):
+def test_synthesis_uses_default_pi_agent(repo, monkeypatch):
     citation = f"{repo.root}/knowledge/wireguard-split-dns.md#Procedimento"
     cfg = os.path.join(repo.root, ".lore", "config.toml")
     with open(cfg, "a", encoding="utf-8") as handle:
-        handle.write('\n[answer]\nbackend = "pi-cli"\n')
+        handle.write("\n")  # sem [llm]: agente padrão é o pi
     calls = []
 
-    def fake_complete(prompt, *, binary, model):
-        calls.append((prompt, binary, model))
+    def fake_complete(self, prompt, system=""):
+        calls.append((prompt, self.binary, self.model))
         return f"Use DNS por domínio [{citation}]."
 
-    monkeypatch.setattr("lore.pi_cli.complete", fake_complete)
+    monkeypatch.setattr("lore.agents.Agent.complete", fake_complete)
     answer = ask(repo, "split DNS WireGuard", extractive=False)
     assert "Use DNS por domínio" in answer.text
     assert calls and "Trechos:" in calls[0][0]
@@ -202,6 +213,7 @@ def test_synthesis_uses_pi_cli_backend(repo, monkeypatch):
 def test_synthesis_falls_back_when_endpoint_down(repo):
     cfg = os.path.join(repo.root, ".lore", "config.toml")
     with open(cfg, "a", encoding="utf-8") as handle:
-        handle.write('\n[answer]\nlocal_model_endpoint = "http://127.0.0.1:1"\n')
+        handle.write('\n[llm]\nagent = "local"\n[agents.local]\nkind = "openai"\n'
+                     'endpoint = "http://127.0.0.1:1"\n')
     answer = ask(repo, "split DNS WireGuard", extractive=False)
     assert "Fontes locais:" in answer.text
