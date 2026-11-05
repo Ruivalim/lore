@@ -53,6 +53,7 @@ class ResearchResult:
     blocked: str = ""  # motivo quando ok=False por política (segredo, etc.)
     error: str = ""  # falha operacional (rede, provedor); pergunta preservada
     discarded: list[str] = field(default_factory=list)
+    summary: str = ""  # resposta curta; também vai para o front matter
 
 
 class WebSearch:
@@ -193,11 +194,34 @@ def build_prompt(question: str, local_context: str,
         f"Pergunta: {question}\n\n"
         f"Contexto local (pode estar vazio):\n{local_context or '(vazio)'}\n\n"
         f"Passagens web:\n{cited or '(nenhuma)'}\n\n"
-        "Produza: 1) RESPOSTA direta marcada como provisória; 2) seção "
-        "CITAÇÕES (o que veio de cada fonte); 3) seção CONCLUSÕES DO MODELO "
-        "(o que é inferência sua); 4) seção INCERTEZAS. "
+        "Produza em Markdown, nesta ordem: 1) seção `## Resumo` com a "
+        "resposta direta em 1 a 3 frases; 2) RESPOSTA completa marcada como "
+        "provisória; 3) seção CITAÇÕES (o que veio de cada fonte); 4) seção "
+        "CONCLUSÕES DO MODELO (o que é inferência sua); 5) seção INCERTEZAS. "
         "Se as fontes forem fracas ou conflitarem, diga isso."
     )
+
+
+def clean_summary(text: str) -> str:
+    """Uma linha, sem Markdown de bloco, cortada no limite do front matter."""
+    from .models import SUMMARY_MAX
+
+    line = re.sub(r"\s+", " ", text).strip()
+    if len(line) > SUMMARY_MAX:
+        line = line[:SUMMARY_MAX - 1].rsplit(" ", 1)[0] + "…"
+    return line
+
+
+def extract_summary(response: str) -> tuple[str, str]:
+    """(resumo, resto) quando a resposta abre com `## Resumo`. Senão ('', tudo)."""
+    match = re.match(r"\s*#{1,3}[ \t]*Resumo[ \t]*\n(.*?)(?=\n#{1,3}\s|\Z)(.*)",
+                     response, flags=re.DOTALL | re.IGNORECASE)
+    if not match:
+        return "", response
+    summary = clean_summary(match.group(1))
+    if not summary:
+        return "", response
+    return summary, match.group(2).lstrip("\n")
 
 
 def _slug(question: str) -> str:
@@ -206,11 +230,12 @@ def _slug(question: str) -> str:
 
 
 def build_draft(question: str, response: str, sources: list[Source],
-                doc_type: str = "research") -> tuple[dict, str]:
+                doc_type: str = "research", summary: str = "") -> tuple[dict, str]:
     today = _today()
     front = {
         "id": _slug(question),
         "title": question.strip().capitalize()[:120] or "Pesquisa",
+        **({"summary": summary} if summary else {}),
         "type": doc_type,
         "status": "draft",
         "tags": ["pesquisa-externa"],
@@ -287,8 +312,13 @@ def research(repo: repo_mod.Repo, question: str, local_context: str = "",
 
 
 def _save_draft(repo: repo_mod.Repo, question: str, response: str,
-                sources: list[Source], discarded: list[str]) -> ResearchResult:
-    front, body = build_draft(question, response, sources)
+                sources: list[Source], discarded: list[str],
+                summary: str = "") -> ResearchResult:
+    if summary:
+        summary = clean_summary(summary)
+    else:
+        summary, response = extract_summary(response)
+    front, body = build_draft(question, response, sources, summary=summary)
     base_id = front["id"]
     counter = 1
     while repo_mod.find_by_id(repo, front["id"]) is not None:
@@ -312,7 +342,7 @@ def _save_draft(repo: repo_mod.Repo, question: str, response: str,
         f"Rascunho salvo em:\n  {dest}\n\n{response.strip()}\n"
     )
     return ResearchResult(ok=True, answer=answer, draft_path=dest,
-                          sources=sources, discarded=discarded)
+                          sources=sources, discarded=discarded, summary=summary)
 
 
 class ClaudeAgent:
@@ -360,12 +390,13 @@ def research_agent(repo: repo_mod.Repo, question: str, local_context: str = "",
     except Exception as exc:  # noqa: BLE001 - contrato: explica e preserva
         return ResearchResult(ok=False, error=(
             f"pesquisa com Claude falhou ({exc}). Pergunta preservada; repita depois."))
-    leaked = scan(result.answer, extra_patterns)
+    produced = f"{result.summary}\n{result.answer}"
+    leaked = scan(produced, extra_patterns)
     if leaked.found:
         return ResearchResult(ok=False, blocked=(
             f"resposta do Claude contém possível segredo ({', '.join(leaked.found)}); "
             "nada foi salvo."))
-    if scan_injection(result.answer):
+    if scan_injection(produced):
         return ResearchResult(ok=False, error=(
             "resposta do Claude continha padrão de instruction; descartada. "
             "Pergunta preservada."))
@@ -373,4 +404,5 @@ def research_agent(repo: repo_mod.Repo, question: str, local_context: str = "",
     sources = [Source(url=src["url"], title=src["title"], accessed_at=today)
                for src in result.sources]
     discarded = [f"ferramenta negada: {tool}" for tool in result.denied]
-    return _save_draft(repo, question, result.answer, sources, discarded)
+    return _save_draft(repo, question, result.answer, sources, discarded,
+                       summary=result.summary)

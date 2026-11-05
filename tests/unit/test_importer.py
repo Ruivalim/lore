@@ -104,3 +104,34 @@ def test_import_suffixes_duplicate_ids(repo, tmp_path, monkeypatch):
     second = import_markdown(repo, str(source), {})
     assert first.doc_id == "same-title"
     assert second.doc_id == "same-title-2"
+
+
+def test_import_saves_summary_as_single_line(repo, tmp_path, monkeypatch):
+    source = tmp_path / "s.md"
+    source.write_text("# Split DNS\n\nUse `resolvectl`.\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "lore.agents.Agent.complete",
+        lambda self, prompt, system="": json.dumps({
+            "title": "Split DNS", "type": "howto", "tags": ["dns"],
+            "summary": "Configura DNS: por domínio\nno túnel.",
+        }),
+    )
+    result = import_markdown(repo, str(source), {"privacy": {}})
+    doc = parse_doc(Path(result.path).read_text(encoding="utf-8"), result.path)
+    assert doc.valid, doc.errors
+    assert doc.front["summary"] == "Configura DNS: por domínio no túnel."
+    assert result.summary == doc.front["summary"]
+
+
+@pytest.mark.parametrize("summary", [None, "", "   ", 42, ["x"]])
+def test_import_without_usable_summary_still_imports(repo, tmp_path, monkeypatch, summary):
+    source = tmp_path / "s.md"
+    source.write_text("# Nota\n\nTexto.\n", encoding="utf-8")
+    data = {"title": "Nota", "type": "note", "tags": ["x"]}
+    if summary is not None:
+        data["summary"] = summary
+    monkeypatch.setattr("lore.agents.Agent.complete",
+                        lambda self, prompt, system="": json.dumps(data))
+    result = import_markdown(repo, str(source), {"privacy": {}})
+    doc = parse_doc(Path(result.path).read_text(encoding="utf-8"), result.path)
+    assert doc.valid and "summary" not in doc.front

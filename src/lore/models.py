@@ -38,6 +38,7 @@ REQUIRED = (
 )
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+SUMMARY_MAX = 600
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -106,6 +107,13 @@ def validate(front: dict, body: str = "") -> list[str]:
             errors.append("tags deve ser lista não vazia")
         elif any(not isinstance(tag, str) or not tag.strip() for tag in tags):
             errors.append("tags deve conter só texto não vazio")
+
+    summary = front.get("summary")
+    if summary is not None:
+        if not isinstance(summary, str) or not summary.strip():
+            errors.append("summary deve ser texto não vazio")
+        elif len(summary) > SUMMARY_MAX:
+            errors.append(f"summary passa de {SUMMARY_MAX} caracteres")
 
     for key in ("created_at", "updated_at"):
         value = front.get(key)

@@ -27,6 +27,8 @@ type fakeLore struct {
 	rejected   [][2]string // id, motivo
 	edited     []string
 	actionPath string
+
+	summary string // vai no front de todo Show
 }
 
 func (f *fakeLore) Review(context.Context, string) (ReviewInfo, error) { return f.review, nil }
@@ -46,6 +48,9 @@ func (f *fakeLore) EditCmd(id string) *exec.Cmd {
 func (f *fakeLore) List(context.Context) ([]Doc, error) { return f.docs, nil }
 func (f *fakeLore) Show(_ context.Context, id string) (DocDetail, error) {
 	front := map[string]any{"id": id, "title": id}
+	if f.summary != "" {
+		front["summary"] = f.summary
+	}
 	for _, d := range f.docs {
 		if d.ID == id {
 			front["status"] = d.Status
@@ -381,5 +386,90 @@ func TestListFilterAppliesThroughUpdate(t *testing.T) {
 	}
 	if m.docID != "como-descompacta-um-tar" {
 		t.Fatalf("seleção não acompanhou o filtro: %q", m.docID)
+	}
+}
+
+func TestShortAnswerByDefaultAndFTogglesFull(t *testing.T) {
+	f := &fakeLore{local: AskResult{Coverage: "sufficient",
+		Short: "CURTA direta", Text: "COMPLETA longa"}}
+	m := ask(t, newTestModel(f), "q")
+	m = step(m, key("esc")) // sai da caixa de pergunta, como para o d
+	view := plain(m.View())
+	if !strings.Contains(view, "CURTA direta") || strings.Contains(view, "COMPLETA longa") {
+		t.Fatalf("esperava só a curta:\n%s", view)
+	}
+	if !strings.Contains(view, "resposta completa") {
+		t.Fatalf("help sem o atalho f:\n%s", view)
+	}
+	m = step(m, key("f"))
+	view = plain(m.View())
+	if !strings.Contains(view, "COMPLETA longa") || strings.Contains(view, "CURTA direta") {
+		t.Fatalf("f não mostrou a completa:\n%s", view)
+	}
+	m = step(m, key("f"))
+	if !strings.Contains(plain(m.View()), "CURTA direta") {
+		t.Fatal("segundo f não voltou para a curta")
+	}
+}
+
+func TestWithoutShortShowsFullAndFIsInert(t *testing.T) {
+	f := &fakeLore{local: AskResult{Coverage: "sufficient", Text: "SÓ completa"}}
+	m := ask(t, newTestModel(f), "q")
+	m = step(m, key("esc"))
+	m = step(m, key("f"))
+	view := plain(m.View())
+	if !strings.Contains(view, "SÓ completa") {
+		t.Fatalf("sem curta tem que mostrar a completa:\n%s", view)
+	}
+	if strings.Contains(view, "resposta curta") || strings.Contains(view, "resposta completa") {
+		t.Fatalf("atalho f não devia aparecer sem curta:\n%s", view)
+	}
+}
+
+func TestNewAnswerStartsShortAgain(t *testing.T) {
+	f := &fakeLore{local: AskResult{Coverage: "sufficient", Short: "CURTA", Text: "COMPLETA"}}
+	m := ask(t, newTestModel(f), "q1")
+	m = step(m, key("esc"))
+	m = step(m, key("f"))
+	m = ask(t, m, "q2")
+	if !strings.Contains(plain(m.View()), "CURTA") {
+		t.Fatal("resposta nova devia abrir na curta")
+	}
+}
+
+func TestResearchSummaryIsTheShortAnswer(t *testing.T) {
+	f := &fakeLore{local: AskResult{Coverage: "sufficient", Research: &Research{
+		OK: true, Summary: "RESUMO da pesquisa", Answer: "PESQUISA completa"}}}
+	m := ask(t, newTestModel(f), "q")
+	m = step(m, key("esc"))
+	view := plain(m.View())
+	if !strings.Contains(view, "RESUMO da pesquisa") || strings.Contains(view, "PESQUISA completa") {
+		t.Fatalf("pesquisa devia abrir no resumo:\n%s", view)
+	}
+	m = step(m, key("f"))
+	if !strings.Contains(plain(m.View()), "PESQUISA completa") {
+		t.Fatal("f não mostrou a pesquisa completa")
+	}
+}
+
+func TestFailedResearchHasNoShortToggle(t *testing.T) {
+	a := AskResult{Research: &Research{OK: false, Summary: "x", Error: "falhou"}}
+	if a.HasShort() {
+		t.Fatal("pesquisa que falhou não tem curta")
+	}
+}
+
+func TestDocViewShowsSummary(t *testing.T) {
+	f := &fakeLore{docs: []Doc{{ID: "doc-um", Title: "doc-um", Status: "verified", Valid: true}},
+		summary: "Resumo revisado do documento"}
+	m := newTestModel(f)
+	m, msg := run(m, docsMsg{docs: f.docs})
+	for msg != nil {
+		var next tea.Msg
+		m, next = run(m, msg)
+		msg = next
+	}
+	if !strings.Contains(plain(m.View()), "Resumo revisado do documento") {
+		t.Fatalf("leitor sem o summary:\n%s", plain(m.View()))
 	}
 }

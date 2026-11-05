@@ -131,6 +131,7 @@ type Model struct {
 	docID         string
 	docDetail     *DocDetail
 	answer        *AskResult
+	fullAnswer    bool // false: resposta curta quando houver
 
 	state     askState
 	question  string
@@ -327,6 +328,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		res := msg.result
 		m.answer = &res
+		m.fullAnswer = false
 		m.showingAnswer = true
 		m.refreshView()
 		m.view.GotoTop()
@@ -450,6 +452,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.runAsk(true)
 		}
 		return m, nil
+	case "f":
+		if m.showingAnswer && m.answer != nil && m.answer.HasShort() {
+			m.fullAnswer = !m.fullAnswer
+			m.refreshView()
+			m.view.GotoTop()
+		}
+		return m, nil
 	case "d":
 		if m.showingAnswer {
 			m.showingAnswer = false
@@ -543,6 +552,14 @@ func (m *Model) markdown(src string) string {
 	return strings.Trim(out, "\n")
 }
 
+// pick escolhe a curta ou a completa conforme fullAnswer. Sem curta, completa.
+func (m Model) pick(short, full string) string {
+	if m.fullAnswer || strings.TrimSpace(short) == "" {
+		return full
+	}
+	return short
+}
+
 func (m *Model) refreshView() {
 	if m.width == 0 {
 		return
@@ -570,13 +587,13 @@ func (m *Model) refreshView() {
 					}
 					b.WriteString(mutedStyle.Render("rascunho: "+rel) + "\n")
 				}
-				b.WriteString("\n" + m.markdown(stripDraftNotice(r.Answer)) + "\n")
+				b.WriteString("\n" + m.markdown(m.pick(r.Summary, stripDraftNotice(r.Answer))) + "\n")
 			}
 			for _, d := range r.Discarded {
 				b.WriteString(mutedStyle.Render("descartada: "+d) + "\n")
 			}
 		} else {
-			b.WriteString("\n" + m.markdown(a.Text) + "\n")
+			b.WriteString("\n" + m.markdown(m.pick(a.Short, a.Text)) + "\n")
 		}
 		if a.Research == nil && a.NeedsResearch() && !m.research.Enabled {
 			b.WriteString("\n" + mutedStyle.Render("pesquisa externa desligada (research.enabled = false)"))
@@ -604,6 +621,9 @@ func (m *Model) refreshView() {
 			rel = d.Path
 		}
 		b.WriteString(mutedStyle.Render(rel) + "\n\n")
+		if summary, _ := d.Front["summary"].(string); strings.TrimSpace(summary) != "" {
+			b.WriteString(m.markdown("> "+strings.TrimSpace(summary)) + "\n\n")
+		}
 		if status == "draft" {
 			b.WriteString(m.reviewBlock())
 		}
@@ -751,6 +771,13 @@ func (m Model) helpLine() string {
 	}
 	if m.answer != nil && m.research.Enabled && m.state == askIdle {
 		pairs = append([][2]string{{"p", "pesquisar com IA"}}, pairs...)
+	}
+	if m.showingAnswer && m.answer != nil && m.answer.HasShort() {
+		label := "resposta completa"
+		if m.fullAnswer {
+			label = "resposta curta"
+		}
+		pairs = append([][2]string{{"f", label}}, pairs...)
 	}
 	if m.answer != nil {
 		label := "ver resposta"

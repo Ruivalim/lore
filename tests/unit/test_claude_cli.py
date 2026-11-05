@@ -28,7 +28,7 @@ def test_command_blocks_writes_and_personal_connectors():
     assert "--no-session-persistence" in cmd
     assert "--max-budget-usd" not in cmd
     schema = json.loads(cmd[cmd.index("--json-schema") + 1])
-    assert schema["required"] == ["answer", "sources"]
+    assert schema["required"] == ["summary", "answer", "sources"]
 
 
 def test_command_budget_and_model_override():

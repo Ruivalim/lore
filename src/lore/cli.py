@@ -279,6 +279,7 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
     payload = {
         "ok": True,
         "coverage": answer.coverage,
+        "short": answer.short,
         "text": answer.text,
         "citations": answer.citations,
         "gap": answer.gap,
@@ -287,7 +288,7 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
         "research": None,
     }
     if not args.json:
-        sys.stdout.write(answer.text)
+        sys.stdout.write(_short_or_full(answer.short, answer.text, args.full))
     if (
         answer.coverage in ("insufficient", "partial")
         and not args.local_only
@@ -304,6 +305,16 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
     if args.json:
         _out(payload, True)
     return 0
+
+
+FULL_HINT = "(resposta completa: lore ask --full)"
+
+
+def _short_or_full(short: str, full: str, want_full: bool) -> str:
+    """Curta por padrão; a completa com --full ou quando não há curta."""
+    if want_full or not short.strip():
+        return full if full.endswith("\n") else full + "\n"
+    return f"{short.strip()}\n\n{FULL_HINT}\n"
 
 
 RESEARCH_MODES = ("web", "agent")
@@ -388,6 +399,7 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
     result_payload = {
         "ok": result.ok,
         "answer": result.answer,
+        "summary": result.summary,
         "draft_path": result.draft_path,
         "sources": [source.__dict__ for source in result.sources],
         "blocked": result.blocked,
@@ -404,7 +416,12 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
         return 1, result_payload, True
     if not args.json:
         print()
-        print(result.answer)
+        if args.full or not result.summary:
+            print(result.answer)
+        else:
+            print("Resposta externa, ainda não verificada.")
+            print(f"Rascunho salvo em:\n  {result.draft_path}\n")
+            print(f"{result.summary}\n\n{FULL_HINT}")
         for item in result.discarded:
             print(f"descartada: {item}")
     return 0, result_payload, True
@@ -722,6 +739,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--tag", default="")
     p_ask.add_argument("--as-of", default="")
     p_ask.add_argument("--yes", action="store_true")
+    p_ask.add_argument("--full", action="store_true",
+                       help="mostra a resposta completa em vez da curta")
     p_ask.set_defaults(func=cmd_ask)
     p_list = sub.add_parser("list", help="listar documentos")
     p_list.set_defaults(func=cmd_list)

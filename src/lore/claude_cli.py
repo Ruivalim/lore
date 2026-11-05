@@ -29,6 +29,7 @@ DENIED_TOOLS = (
 OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
+        "summary": {"type": "string"},
         "answer": {"type": "string"},
         "sources": {
             "type": "array",
@@ -42,7 +43,7 @@ OUTPUT_SCHEMA = {
             },
         },
     },
-    "required": ["answer", "sources"],
+    "required": ["summary", "answer", "sources"],
 }
 
 SYSTEM_PROMPT = """\
@@ -65,6 +66,7 @@ Responda em português, em Markdown, com as seções:
 ## Conclusões do modelo (o que é inferência sua)
 ## Incertezas
 Se o contexto local influenciou a resposta, diga onde.
+Em `summary`, a resposta direta em 1 a 3 frases, sem Markdown.
 Em `sources`, liste só URLs web que você de fato leu."""
 
 
@@ -78,6 +80,7 @@ def system_prompt(extra_instructions: str = "") -> str:
 @dataclass
 class ClaudeResult:
     answer: str
+    summary: str = ""
     sources: list[dict] = field(default_factory=list)
     cost_usd: float = 0.0
     denied: list[str] = field(default_factory=list)
@@ -139,7 +142,9 @@ def parse_output(stdout: str) -> ClaudeResult:
         sources.append({"url": url, "title": str(src.get("title", "")).strip() or url})
     denied = [str(item.get("tool_name", item)) if isinstance(item, dict) else str(item)
               for item in data.get("permission_denials") or []]
-    return ClaudeResult(answer=answer, sources=sources,
+    summary = out.get("summary")
+    summary = summary.strip() if isinstance(summary, str) else ""
+    return ClaudeResult(answer=answer, summary=summary, sources=sources,
                         cost_usd=float(data.get("total_cost_usd") or 0), denied=denied)
 
 

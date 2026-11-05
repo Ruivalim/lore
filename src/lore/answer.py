@@ -7,6 +7,7 @@ avisa em stale, preserva comandos byte a byte, não esconde conflito.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -34,6 +35,8 @@ class Answer:
     gap: list[str] = field(default_factory=list)
     warning: str = ""
     context: list[tuple[str, str]] = field(default_factory=list)
+    # Resposta direta de 1 a 3 frases, com citação. Vazia: só há a completa.
+    short: str = ""
 
 
 def classify(hits: list[Hit], terms: list[str]) -> tuple[str, list[str]]:
@@ -146,13 +149,48 @@ def synthesis_prompt(question: str, context: list[tuple[str, str]]) -> str:
         "Responda à pergunta usando SOMENTE os trechos abaixo. "
         "Cite cada afirmação como arquivo#seção entre colchetes. "
         "Não invente comandos nem valores.\n\n"
+        "Devolva só um objeto JSON, sem bloco Markdown, com duas chaves:\n"
+        '- "short": a resposta direta, de 1 a 3 frases, com ao menos uma citação;\n'
+        '- "long": a resposta completa, com contexto, passos e citações.\n\n'
         f"Pergunta: {question}\n\nTrechos:\n{blocks}\n"
     )
+
+
+def parse_short_long(response: str) -> tuple[str, str]:
+    """(curta, longa) de uma resposta JSON. Sem JSON utilizável, tudo é longa.
+
+    Agente pode embrulhar o JSON em bloco Markdown ou texto antes e depois:
+    vale o primeiro objeto com "long" texto. Nunca levanta.
+    """
+    text = response.strip()
+    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, flags=re.DOTALL)
+    if fence:
+        text = fence.group(1)
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            data = json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("long"), str) \
+                and data["long"].strip():
+            short = data.get("short")
+            return (short.strip() if isinstance(short, str) else ""), data["long"].strip()
+    return "", response.strip()
 
 
 def synthesize(agent, question: str, context: list[tuple[str, str]]) -> str:
     """Síntese pelo agente da tarefa answer. Levanta em falha."""
     return agent.complete(synthesis_prompt(question, context))
+
+
+def summary_of(repo: repo_mod.Repo, doc_id: str) -> str:
+    """`summary` do front matter, ou ''. Lido do arquivo, não do índice."""
+    doc = repo_mod.find_by_id(repo, doc_id)
+    if doc is None:
+        return ""
+    summary = doc.front.get("summary")
+    return summary.strip() if isinstance(summary, str) else ""
 
 
 def validate_synthesis(response: str, citations: list[str]) -> list[str]:
@@ -260,14 +298,22 @@ def ask(repo: repo_mod.Repo, question: str, limit: int = TOP_CHUNKS,
                 warning = f"síntese com {agent.name} falhou ({exc}); usando modo extrativo"
             else:
                 citations = [cite(hit) for hit in hits[:3]]
-                errors = validate_synthesis(response, citations)
+                short, long = parse_short_long(response)
+                errors = validate_synthesis(long, citations)
                 if not errors:
-                    return Answer(coverage=coverage, text=response.strip() + "\n",
-                                  citations=citations, warning=warning)
+                    # Curta sem citação válida some: a longa continua de pé.
+                    if short and validate_synthesis(short, citations):
+                        short = ""
+                    return Answer(coverage=coverage, text=long + "\n",
+                                  citations=citations, warning=warning, short=short)
                 warning = (f"síntese com {agent.name} sem citação válida "
                            f"({'; '.join(errors)}); usando modo extrativo")
     answer = compose_extractive(hits, warning)
     answer.coverage = coverage
+    top = hits[0]
+    summary = summary_of(repo, top.doc_id) if top.status == "verified" else ""
+    if summary:
+        answer.short = f"{summary} [{cite(top)}]"
     return answer
 
 

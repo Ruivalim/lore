@@ -34,15 +34,25 @@ type DocDetail struct {
 type Research struct {
 	OK        bool     `json:"ok"`
 	Answer    string   `json:"answer"`
+	Summary   string   `json:"summary"`
 	DraftPath string   `json:"draft_path"`
 	Blocked   string   `json:"blocked"`
 	Error     string   `json:"error"`
 	Discarded []string `json:"discarded"`
 }
 
+// HasShort diz se há resposta curta para alternar com a completa.
+func (a AskResult) HasShort() bool {
+	if a.Research != nil {
+		return a.Research.OK && strings.TrimSpace(a.Research.Summary) != ""
+	}
+	return strings.TrimSpace(a.Short) != ""
+}
+
 // AskResult é a saída de `lore ask --json`.
 type AskResult struct {
 	Coverage   string    `json:"coverage"`
+	Short      string    `json:"short"`
 	Text       string    `json:"text"`
 	Citations  []string  `json:"citations"`
 	Gap        []string  `json:"gap"`
