@@ -8,7 +8,7 @@
 # aborta a operação, deixa a árvore como encontrou e notifica o usuário.
 #
 # Uso: lore-sync [-q|--quiet]
-#   -q  silencioso (para timer); erros ainda notificam.
+#   -q  silencioso; erros ainda notificam.
 set -euo pipefail
 
 QUIET=0
