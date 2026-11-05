@@ -131,8 +131,8 @@ def _rel(root: str, path: str) -> str:
 def pending_push(root: str) -> int | None:
     """Commits locais à frente do upstream. None se não dá para determinar."""
     try:
-        result = _run(root, "rev-list", "--count", "--left-only",
-                      "@{upstream}...HEAD").stdout.strip()
+        result = _run(root, "rev-list", "--count",
+                      "@{upstream}..HEAD").stdout.strip()
         return int(result)
     except (GitError, ValueError):
         return None

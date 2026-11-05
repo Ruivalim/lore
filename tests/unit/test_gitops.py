@@ -4,6 +4,7 @@ Foco no que quebra: move gera dois caminhos (origem+destino), push que não pode
 derrubar o comando, filtro de caminho fora da raiz, flag desligada = nada.
 """
 
+import json
 import os
 import subprocess
 
@@ -145,16 +146,23 @@ def test_auto_commit_enabled_legacy_privacy():
     )
 
 
-def test_doctor_reports_pending_push(git_repo, capsys):
+def test_doctor_reports_pending_push(git_repo, tmp_path, capsys):
+    """Push que falha deixa o commit local e o doctor precisa contar ele."""
+    remote = tmp_path.parent / f"{tmp_path.name}-remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    branch = _git(git_repo, "branch", "--show-current").stdout.strip()
+    _git(git_repo, "remote", "add", "origin", str(remote))
+    _git(git_repo, "push", "-q", "-u", "origin", branch)
+    remote.rename(remote.with_name(remote.name + ".fora"))  # remoto inacessível
     _enable_autocommit(git_repo)
-    main(["--root", git_repo, "new", "--type", "note", "--title", "Pendente"])
+
+    assert main(["--root", git_repo, "new", "--type", "note", "--title", "Pendente"]) == 0
     capsys.readouterr()
-    # Sem upstream, pending_push é None -> sem aviso; crie upstream local.
-    _git(git_repo, "remote", "add", "origin", str(git_repo) + "-remote")
-    _git(git_repo, "checkout", "-qb", "main")
-    # doctor não deve quebrar
-    rc = main(["--root", git_repo, "doctor", "--json"])
-    assert rc in (0, 1)
+
+    assert gitops.pending_push(git_repo) == 1
+    main(["--root", git_repo, "doctor", "--json"])
+    warnings = json.loads(capsys.readouterr().out)["warnings"]
+    assert any("1 commit(s)" in item for item in warnings)
 
 
 def test_repo_lock_is_exclusive(git_repo):
@@ -168,3 +176,23 @@ def test_repo_lock_is_exclusive(git_repo):
             with pytest.raises(OSError):
                 fcntl.flock(b.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         fcntl.flock(a.fileno(), fcntl.LOCK_UN)
+
+
+def test_write_pushes_to_upstream_without_pull(git_repo, tmp_path):
+    """Escritor único: cada escrita chega ao remoto sem timer nem pull."""
+    remote = tmp_path.parent / f"{tmp_path.name}-remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    branch = _git(git_repo, "branch", "--show-current").stdout.strip()
+    _git(git_repo, "remote", "add", "origin", str(remote))
+    _git(git_repo, "push", "-q", "-u", "origin", branch)
+    _enable_autocommit(git_repo)
+
+    assert main(["--root", git_repo, "new", "--type", "note", "--title", "Sobe"]) == 0
+
+    local = _git(git_repo, "rev-parse", "HEAD").stdout.strip()
+    pushed = subprocess.run(
+        ["git", "-C", str(remote), "rev-parse", branch],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert pushed == local
+    assert gitops.pending_push(git_repo) == 0
