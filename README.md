@@ -8,10 +8,13 @@ Status: implementação funcional em desenvolvimento. O núcleo documental, busc
 
 ```sh
 make install
-lore config --global --init
+lore init ~/lore-acervo
+lore config --global --init   # e aponte repository.root para ~/lore-acervo
 lore import arquivo.md
 lore review
 ```
+
+O acervo (documentos, rascunhos, arquivo e `.lore/config.toml`) mora num repositório próprio, separado deste código. `lore init` cria a estrutura, o `.gitignore` do índice local e roda `git init` se o caminho não estiver dentro de outro repositório.
 
 `make install` instala Lore editável no PATH do usuário via pipx. A configuração global fica em `~/.config/lore/config.yaml`; `repository.root` aponta para o acervo usado fora dele e `pi.model` escolhe o modelo Pi no formato `provider/model-id`, vazio usa o default do Pi. A raiz segue esta precedência: `--root`, repositório Lore ancestral do diretório atual, `repository.root` global. Config TOML em `.lore/config.toml` pode sobrescrever opções operacionais, mas não troca a raiz global.
 
