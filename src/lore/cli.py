@@ -608,6 +608,24 @@ def cmd_config(args, repo: repo_mod.Repo) -> int:
     return 0
 
 
+def cmd_init(args) -> int:
+    try:
+        result = repo_mod.init_repo(args.caminho, git=not args.no_git)
+    except (FileExistsError, ValueError, OSError, gitops.GitError) as exc:
+        return _err(str(exc), args.json)
+    root = result["root"]
+    message = f"acervo criado em {root}"
+    if result["git_initialized"]:
+        message += " (git init)"
+    if config_mod.global_repository_root() != root:
+        message += (
+            "\npara usar fora dele, aponte repository.root para este caminho em "
+            f"{config_mod.global_config_path()}"
+        )
+    _out({"ok": True, "message": message, **result}, args.json)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--root", default="", help="raiz do repositório lore")
@@ -622,6 +640,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     _orig_add = sub.add_parser
     sub.add_parser = lambda *a, **k: _orig_add(*a, parents=[common_sub], **k)
+
+    p_init = sub.add_parser("init", help="criar um acervo novo")
+    p_init.add_argument("caminho", nargs="?", default=".")
+    p_init.add_argument("--no-git", action="store_true", help="não roda git init")
+    p_init.set_defaults(func=cmd_init, needs_repo=False)
 
     p_new = sub.add_parser("new", help="criar rascunho a partir de template")
     p_new.add_argument("--type", required=True, choices=TYPES)
@@ -701,6 +724,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if not getattr(args, "needs_repo", True):
+        return args.func(args)
     try:
         root = repo_mod.resolve_root(
             explicit=args.root,

@@ -66,6 +66,54 @@ def resolve_root(explicit: str = "", start: str = "", configured: str = "") -> s
     )
 
 
+GITIGNORE_LINE = ".lore/"
+
+
+def init_repo(path: str, *, git: bool = True) -> dict:
+    """Cria um acervo Lore em path sem sobrescrever nada que já exista.
+
+    Cria knowledge/, drafts/ e archive/ (com .gitkeep), .lore/config.toml e
+    garante `.lore/` no .gitignore, porque índice e lock são locais. Com git,
+    roda `git init` só se path ainda não estiver dentro de um repositório Git.
+    """
+    from . import config as config_mod
+
+    root = os.path.abspath(os.path.expanduser(path))
+    if os.path.exists(root) and not os.path.isdir(root):
+        raise ValueError(f"não é um diretório: {root}")
+    if is_repo_root(root):
+        raise FileExistsError(f"já é um repositório Lore: {root}")
+    os.makedirs(root, exist_ok=True)
+    created: list[str] = []
+    for name in MANAGED_DIRS:
+        directory = os.path.join(root, name)
+        os.makedirs(directory, exist_ok=True)
+        keep = os.path.join(directory, ".gitkeep")
+        if not os.path.exists(keep):
+            open(keep, "x", encoding="utf-8").close()
+            created.append(os.path.join(name, ".gitkeep"))
+    created.append(os.path.relpath(config_mod.init(root), root))
+
+    gitignore = os.path.join(root, ".gitignore")
+    lines: list[str] = []
+    if os.path.isfile(gitignore):
+        with open(gitignore, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    if GITIGNORE_LINE not in (line.strip() for line in lines):
+        with open(gitignore, "a", encoding="utf-8") as handle:
+            if lines and lines[-1].strip():
+                handle.write("\n")
+            handle.write("# índice e lock locais, reconstruíveis\n")
+            handle.write(GITIGNORE_LINE + "\n")
+        created.append(".gitignore")
+
+    git_initialized = False
+    if git and shutil.which("git") and not gitops.is_git_repo(root):
+        gitops.init(root)
+        git_initialized = True
+    return {"root": root, "created": created, "git_initialized": git_initialized}
+
+
 def find_root(start: str = "") -> str:
     """Compatibilidade: descobre raiz ou preserva antigo fallback para cwd."""
     return discover_root(start) or os.path.abspath(start or os.getcwd())

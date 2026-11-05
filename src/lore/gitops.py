@@ -83,6 +83,10 @@ def is_git_repo(root: str) -> bool:
     return out == "true"
 
 
+def init(root: str) -> None:
+    _run(root, "init", "-q")
+
+
 def lock_path(root: str) -> str:
     return os.path.join(root, ".lore", LOCK_NAME)
 
