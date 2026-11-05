@@ -38,6 +38,9 @@ REQUIRED = (
 )
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+REVIEW_POLICIES = ("human", "auto-if-clean", "auto")
+AUTO_POLICIES = ("auto-if-clean", "auto")
+REVIEWERS = ("human", "auto")
 SUMMARY_MAX = 600
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -107,6 +110,10 @@ def validate(front: dict, body: str = "") -> list[str]:
             errors.append("tags deve ser lista não vazia")
         elif any(not isinstance(tag, str) or not tag.strip() for tag in tags):
             errors.append("tags deve conter só texto não vazio")
+
+    reviewed_by = front.get("reviewed_by")
+    if reviewed_by is not None and reviewed_by not in REVIEWERS:
+        errors.append(f"reviewed_by inválido: {reviewed_by!r} (human ou auto)")
 
     summary = front.get("summary")
     if summary is not None:
@@ -181,13 +188,18 @@ def can_transition(status: str, new_status: str) -> bool:
     return new_status in TRANSITIONS.get(status, ())
 
 
-def transition(doc: Doc, new_status: str, human: bool = False) -> list[str]:
-    """Aplica transição de estado. Retorna erros (vazio = ok, doc mutado)."""
+def transition(doc: Doc, new_status: str, human: bool = False,
+               policy: str = "") -> list[str]:
+    """Aplica transição de estado. Retorna erros (vazio = ok, doc mutado).
+
+    Promoção a verified exige human=True ou uma política de revisão
+    automática (`policy`) que o usuário ligou em [review].
+    """
     if new_status not in STATUSES:
         return [f"status inválido: {new_status!r}"]
     if not can_transition(doc.status, new_status):
         return [f"transição proibida: {doc.status} -> {new_status}"]
-    if new_status == "verified" and not human:
+    if new_status == "verified" and not human and policy not in AUTO_POLICIES:
         return ["promoção a verified exige aprovação humana (--human)"]
     doc.front["status"] = new_status
     return []

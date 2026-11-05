@@ -155,7 +155,7 @@ func (m Model) handleReviewKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		if !ok {
 			return m, nil, true
 		}
-		if doc.Status != "draft" {
+		if doc.Status != "draft" && !doc.NeedsConfirmation() {
 			m.notice = "só rascunho pode ser aprovado (este é " + doc.Status + ")"
 			return m, nil, true
 		}
@@ -286,8 +286,12 @@ func (m Model) reviewBanner(width int) string {
 	switch m.reviewMode {
 	case reviewConfirmApprove:
 		doc, _ := m.selectedDoc()
+		question := "Aprovar “" + truncate(doc.Title, width/2) + "”? Vira verificado e passa a responder perguntas.  "
+		if doc.NeedsConfirmation() {
+			question = "Confirmar a revisão de “" + truncate(doc.Title, width/2) + "”? Entrou sem revisão humana.  "
+		}
 		return bannerStyle.BorderForeground(colGreen).Width(width).Render(
-			"Aprovar “" + truncate(doc.Title, width/2) + "”? Vira verificado e passa a responder perguntas.  " +
+			question +
 				keyStyle.Render("enter") + " aprova · " + keyStyle.Render("esc") + " cancela")
 	case reviewReason:
 		return bannerStyle.BorderForeground(colRed).Width(width).Render(

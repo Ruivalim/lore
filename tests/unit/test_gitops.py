@@ -196,3 +196,16 @@ def test_write_pushes_to_upstream_without_pull(git_repo, tmp_path):
     ).stdout.strip()
     assert pushed == local
     assert gitops.pending_push(git_repo) == 0
+
+
+def test_commit_survives_path_created_and_moved_before_commit(git_repo):
+    """Auto-aprovação cria em drafts/ e move para knowledge/ antes do commit:
+    o caminho de origem nunca existiu no git e não pode derrubar o commit."""
+    os.makedirs(os.path.join(git_repo, "knowledge"), exist_ok=True)
+    dest = os.path.join(git_repo, "knowledge", "x.md")
+    with open(dest, "w", encoding="utf-8") as handle:
+        handle.write("x\n")
+    ghost = os.path.join(git_repo, "drafts", "x.md")  # nunca existiu no git
+    commit = gitops.commit_paths(git_repo, [ghost, dest], "import", "x")
+    assert commit
+    assert _commit_files(git_repo) == ["knowledge/x.md"]

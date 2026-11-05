@@ -1,7 +1,8 @@
 """Fila de revisão e promoção de rascunhos (PLAN Fase 5, README §6.4).
 
-Nenhuma promoção a verified sem human=True. Modelos chamam as mesmas
-funções e recebem erro.
+Nenhuma promoção a verified sem human=True, a não ser que o usuário tenha
+ligado uma política automática em [review]. O que entra assim fica marcado
+`reviewed_by: auto` e continua na fila até um humano confirmar.
 """
 
 from __future__ import annotations
@@ -14,7 +15,9 @@ import subprocess
 from . import index as index_mod
 from . import gitops
 from . import repo as repo_mod
-from .models import parse_doc, transition
+from .models import AUTO_POLICIES, REVIEW_POLICIES, parse_doc, transition
+
+REVIEW_SOURCES = ("import", "research")
 
 
 def _today() -> str:
@@ -33,6 +36,9 @@ def queue(repo: repo_mod.Repo) -> list[tuple[str, str, str]]:
             items.append((updated, doc.id, doc.path, "aguarda revisão"))
         elif status == "stale":
             items.append((updated, doc.id, doc.path, "revisar atualidade"))
+        elif status == "verified" and doc.front.get("reviewed_by") == "auto":
+            items.append((updated, doc.id, doc.path,
+                          "aprovado sem revisão; confirme com approve --human"))
         elif status == "verified":
             review_after = doc.front.get("review_after")
             if isinstance(review_after, str) and review_after < _today():
@@ -128,25 +134,101 @@ def _rewrite(doc, repo: repo_mod.Repo) -> None:
         doc.path, repo_mod.render_doc(doc.front, doc.body))
 
 
-def approve(repo: repo_mod.Repo, doc_id: str, human: bool = False) -> str:
-    """Promove draft a verified e reindexa. Exige human=True."""
+def approve(repo: repo_mod.Repo, doc_id: str, human: bool = False,
+            policy: str = "") -> str:
+    """Promove draft a verified e reindexa. Exige human=True ou política auto.
+
+    Em verified que entrou sem revisão, human=True só confirma a revisão.
+    """
     doc = repo_mod.find_by_id(repo, doc_id)
     if doc is None:
         raise KeyError(f"id não encontrado: {doc_id}")
     if not doc.valid:
         raise ValueError(f"documento inválido: {'; '.join(doc.errors)}")
+    if doc.status == "verified" and doc.front.get("reviewed_by") == "auto":
+        if not human:
+            raise ValueError("confirmar revisão exige aprovação humana (--human)")
+        doc.front["reviewed_by"] = "human"
+        doc.front["updated_at"] = _today()
+        _rewrite(doc, repo)
+        gitops.touch(doc.path)
+        index_mod.build(repo)
+        return doc.path
     if doc.status != "draft":
         raise ValueError(f"só draft pode ser aprovado (atual: {doc.status})")
-    errors = transition(doc, "verified", human=human)
+    errors = transition(doc, "verified", human=human, policy=policy)
     if errors:
         raise ValueError("; ".join(errors))
     today = _today()
     doc.front["verified_at"] = today
     doc.front["updated_at"] = today
+    doc.front["reviewed_by"] = "human" if human else "auto"
     _rewrite(doc, repo)
     dest = _move(doc.path, repo.managed_dir(repo_mod.KNOWLEDGE))
     index_mod.build(repo)
     return dest
+
+
+def policy_for(cfg: dict, source: str) -> str:
+    """Política de [review] para a origem (import ou research)."""
+    if source not in REVIEW_SOURCES:
+        raise ValueError(f"origem de revisão desconhecida: {source}")
+    value = cfg.get("review", {}).get(source, "human")
+    if value not in REVIEW_POLICIES:
+        raise ValueError(
+            f"review.{source} inválido: {value!r} (use {', '.join(REVIEW_POLICIES)})")
+    return value
+
+
+def clean_check(repo: repo_mod.Repo, doc_id: str, source: str,
+                discarded: list[str] | None = None) -> list[str]:
+    """Motivos que impedem a aprovação automática em auto-if-clean.
+
+    Pesquisa precisa de fonte web, nada sem fonte, nenhuma página descartada
+    por injection e nenhum conflito. Import é conteúdo seu: só conflito.
+    """
+    doc = repo_mod.find_by_id(repo, doc_id)
+    if doc is None:
+        return [f"id não encontrado: {doc_id}"]
+    if not doc.valid:
+        return [f"documento inválido: {'; '.join(doc.errors)}"]
+    reasons: list[str] = []
+    if source == "research":
+        urls = [entry for entry in doc.front.get("sources") or []
+                if isinstance(entry, dict) and str(entry.get("url", "")).startswith("http")]
+        if not urls:
+            reasons.append("nenhuma fonte web")
+        claims = unsourced_claims(doc.body)
+        if claims:
+            reasons.append(f"{len(claims)} trecho(s) sem fonte")
+        injected = [item for item in discarded or [] if "injection" in item]
+        if injected:
+            reasons.append(f"{len(injected)} página(s) descartada(s) por injection")
+    conflicts = possible_conflicts(repo, doc_id)
+    if conflicts:
+        reasons.append(f"possível conflito com {', '.join(conflicts)}")
+    return reasons
+
+
+def apply_policy(repo: repo_mod.Repo, cfg: dict, doc_id: str, source: str,
+                 discarded: list[str] | None = None) -> dict:
+    """Aplica [review] ao rascunho recém-criado.
+
+    Retorna {"policy", "approved", "path", "reasons"}. Política human não faz
+    nada; auto aprova qualquer rascunho válido; auto-if-clean só o limpo.
+    """
+    policy = policy_for(cfg, source)
+    result = {"policy": policy, "approved": False, "path": "", "reasons": []}
+    if policy not in AUTO_POLICIES:
+        return result
+    if policy == "auto-if-clean":
+        reasons = clean_check(repo, doc_id, source, discarded)
+        if reasons:
+            result["reasons"] = reasons
+            return result
+    result["path"] = approve(repo, doc_id, human=False, policy=policy)
+    result["approved"] = True
+    return result
 
 
 def reject(repo: repo_mod.Repo, doc_id: str, reason: str,

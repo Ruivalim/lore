@@ -768,6 +768,8 @@ func (m Model) helpLine() string {
 		{"r", "recarregar"}, {"q", "sair"}}
 	if doc, ok := m.selectedDoc(); ok && doc.Status == "draft" {
 		pairs = append([][2]string{{"A", "aprovar"}, {"R", "rejeitar"}}, pairs...)
+	} else if ok && doc.NeedsConfirmation() {
+		pairs = append([][2]string{{"A", "confirmar revisão"}}, pairs...)
 	}
 	if m.answer != nil && m.research.Enabled && m.state == askIdle {
 		pairs = append([][2]string{{"p", "pesquisar com IA"}}, pairs...)

@@ -37,6 +37,26 @@ def _auto_commit(repo: repo_mod.Repo, action: str, subject: str) -> None:
         pass
 
 
+def _apply_review(repo: repo_mod.Repo, cfg: dict, doc_id: str, source: str,
+                  discarded: list[str] | None = None) -> dict:
+    """[review] no rascunho novo. Erro de política vira aviso: o rascunho fica."""
+    from . import review as review_mod
+
+    try:
+        return review_mod.apply_policy(repo, cfg, doc_id, source, discarded)
+    except (KeyError, ValueError) as exc:
+        return {"policy": "", "approved": False, "path": "", "reasons": [str(exc)]}
+
+
+def _review_message(review: dict) -> str:
+    if review.get("approved"):
+        return (f"aprovado automaticamente (review = {review['policy']}): "
+                f"{review['path']}\nconfirme depois com: lore approve <id> --human")
+    if review.get("reasons"):
+        return "ficou em rascunho: " + "; ".join(review["reasons"])
+    return ""
+
+
 def _today() -> str:
     return datetime.date.today().isoformat()
 
@@ -113,16 +133,22 @@ def cmd_import(args, repo: repo_mod.Repo) -> int:
         result = import_markdown(repo, args.arquivo, cfg)
     except (TypeError, ValueError, FileNotFoundError, OSError, RuntimeError) as exc:
         return _err(str(exc), args.json)
+    review = _apply_review(repo, cfg, result.doc_id, "import")
     _auto_commit(repo, "import", result.doc_id)
+    message = f"importado como draft: {result.path}"
+    if review["approved"] or review["reasons"]:
+        message += "\n" + _review_message(review)
     payload = {
         "ok": True,
         "id": result.doc_id,
         "title": result.title,
         "type": result.doc_type,
         "tags": result.tags,
-        "status": "draft",
-        "path": result.path,
-        "message": f"importado como draft: {result.path}",
+        "summary": result.summary,
+        "status": "verified" if review["approved"] else "draft",
+        "path": review["path"] or result.path,
+        "review": review,
+        "message": message,
     }
     _out(payload, args.json)
     return 0
@@ -225,6 +251,7 @@ def cmd_list(args, repo: repo_mod.Repo) -> int:
             "updated_at": str(doc.front.get("updated_at") or ""),
             "path": os.path.relpath(doc.path, repo.root),
             "valid": doc.valid,
+            "reviewed_by": str(doc.front.get("reviewed_by") or ""),
         })
     if args.json:
         _out({"ok": True, "docs": docs}, True)
@@ -414,6 +441,13 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
         if not args.json:
             print(result.error)
         return 1, result_payload, True
+    review = None
+    if result.ok and result.draft_path:
+        doc_id = os.path.splitext(os.path.basename(result.draft_path))[0]
+        review = _apply_review(repo, cfg, doc_id, "research", result.discarded)
+        result_payload["review"] = review
+        if review["approved"]:
+            result_payload["draft_path"] = review["path"]
     if not args.json:
         print()
         if args.full or not result.summary:
@@ -422,6 +456,8 @@ def _maybe_research(args, repo: repo_mod.Repo, question: str, answer):
             print("Resposta externa, ainda não verificada.")
             print(f"Rascunho salvo em:\n  {result.draft_path}\n")
             print(f"{result.summary}\n\n{FULL_HINT}")
+        if review and (review["approved"] or review["reasons"]):
+            print(_review_message(review))
         for item in result.discarded:
             print(f"descartada: {item}")
     return 0, result_payload, True
@@ -580,6 +616,13 @@ def run_doctor(repo: repo_mod.Repo, probe: bool = False) -> tuple[list[str], lis
     problems.extend(f"config: {err}" for err in cfg_errors)
     warnings.extend(f"config: chave desconhecida, ignorada: {item}"
                     for item in config_mod.config_warnings(repo.root))
+    from . import review as review_mod
+
+    for source in review_mod.REVIEW_SOURCES:
+        try:
+            review_mod.policy_for(cfg, source)
+        except ValueError as exc:
+            problems.append(f"config: {exc}")
     agent_problems, agent_warnings = _check_agents(cfg, probe)
     problems.extend(agent_problems)
     warnings.extend(agent_warnings)

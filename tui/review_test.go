@@ -191,3 +191,29 @@ func TestStaleReviewIgnored(t *testing.T) {
 		t.Fatal("review de outro documento foi aplicado")
 	}
 }
+
+func TestAutoApprovedCanBeConfirmedWithA(t *testing.T) {
+	f := reviewFixture()
+	f.docs = append(f.docs, Doc{ID: "auto", Title: "Entrou sozinho", Status: "verified",
+		ReviewedBy: "auto", Path: "knowledge/auto.md"})
+	m := loaded(t, f)
+	m, cmd := press(t, m, "j", "j")
+	m = drain(t, m, cmd, 0)
+	if !strings.Contains(plain(m.View()), "confirmar revisão") {
+		t.Fatalf("help sem confirmar revisão:\n%s", plain(m.View()))
+	}
+	m, _ = press(t, m, "A")
+	if m.reviewMode != reviewConfirmApprove || !strings.Contains(plain(m.View()), "Entrou sem revisão humana") {
+		t.Fatalf("A não pediu confirmação de revisão: modo %v", m.reviewMode)
+	}
+	next, cmd := m.Update(key("enter"))
+	drain(t, next.(Model), cmd, 0)
+	if len(f.approved) != 1 || f.approved[0] != "auto" {
+		t.Fatalf("aprovados %v", f.approved)
+	}
+	// R continua só para rascunho
+	m, _ = press(t, m, "esc", "R")
+	if m.reviewMode != reviewNone {
+		t.Fatal("R abriu motivo num verificado")
+	}
+}

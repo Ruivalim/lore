@@ -13,14 +13,15 @@ import (
 
 // Doc é uma linha de `lore list --json`.
 type Doc struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Type      string   `json:"type"`
-	Status    string   `json:"status"`
-	Tags      []string `json:"tags"`
-	UpdatedAt string   `json:"updated_at"`
-	Path      string   `json:"path"`
-	Valid     bool     `json:"valid"`
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Type       string   `json:"type"`
+	Status     string   `json:"status"`
+	Tags       []string `json:"tags"`
+	UpdatedAt  string   `json:"updated_at"`
+	Path       string   `json:"path"`
+	Valid      bool     `json:"valid"`
+	ReviewedBy string   `json:"reviewed_by"`
 }
 
 // DocDetail vem de `lore show --json`.
@@ -39,6 +40,11 @@ type Research struct {
 	Blocked   string   `json:"blocked"`
 	Error     string   `json:"error"`
 	Discarded []string `json:"discarded"`
+}
+
+// NeedsConfirmation: entrou em verified pela política automática.
+func (d Doc) NeedsConfirmation() bool {
+	return d.Status == "verified" && d.ReviewedBy == "auto"
 }
 
 // HasShort diz se há resposta curta para alternar com a completa.

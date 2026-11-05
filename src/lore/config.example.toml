@@ -74,6 +74,18 @@ max_budget_usd = 0
 # outra fonte de contexto que ele pode consultar.
 extra_instructions = ""
 
+# Quem aprova o rascunho que cada origem cria.
+# human: fica em drafts/ até `lore approve <id> --human` (ou A no TUI).
+# auto-if-clean: aprova sozinho só se estiver limpo. Pesquisa: ao menos uma
+#   fonte web, nenhum trecho sem fonte, nenhuma página descartada por
+#   injection e nenhum conflito com a base. Import (conteúdo seu): só conflito.
+# auto: aprova qualquer rascunho válido.
+# O que entra sem revisão fica com `reviewed_by: auto` e segue na fila do
+# `lore review` até `lore approve <id> --human` confirmar.
+[review]
+import = "human"
+research = "human"
+
 [privacy]
 # Regex a mais tratadas como segredo: bloqueiam envio a agente e rascunho.
 extra_patterns = []

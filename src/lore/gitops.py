@@ -156,6 +156,13 @@ def commit_paths(root: str, paths: list[str], action: str, subject: str) -> str 
     if not rels:
         return None
     with repo_lock(root):
+        # Caminho criado e movido antes do commit (rascunho aprovado na hora)
+        # não existe nem no disco nem no git: `git add` falharia com ele.
+        tracked = set(_run(root, "ls-files", "--", *rels).stdout.split("\n"))
+        rels = [rel for rel in rels
+                if rel in tracked or os.path.lexists(os.path.join(root, rel))]
+        if not rels:
+            return None
         _run(root, "add", "--", *rels)
         staged = _run(root, "diff", "--cached", "--name-only").stdout.strip()
         if not staged:
