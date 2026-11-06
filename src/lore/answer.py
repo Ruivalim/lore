@@ -1,4 +1,4 @@
-"""Avaliador de cobertura + compositor extrativo (PLAN Fase 3, README §10.5/§10.6).
+"""Avaliador de cobertura + compositor extrativo (plano, Fase 3, spec §10.5/§10.6).
 
 Regras: responde só com trechos recuperados, cita arquivo e seção, separa
 fato de incerteza, declara lacunas, nunca usa draft/archived (nem indexam),
@@ -148,7 +148,7 @@ def synthesis_prompt(question: str, context: list[tuple[str, str]]) -> str:
     return (
         "Responda à pergunta usando SOMENTE os trechos abaixo. "
         "Cite cada afirmação como arquivo#seção entre colchetes. "
-        "Não invente comandos nem valores.\n\n"
+        "Não invente comandos nem valores. Responda no idioma da pergunta.\n\n"
         "Devolva só um objeto JSON, sem bloco Markdown, com duas chaves:\n"
         '- "short": a resposta direta, de 1 a 3 frases, com ao menos uma citação;\n'
         '- "long": a resposta completa, com contexto, passos e citações.\n\n'

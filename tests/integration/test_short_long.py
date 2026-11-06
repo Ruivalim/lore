@@ -243,3 +243,15 @@ def test_claude_summary_goes_to_front_matter(repo):
     result = research_agent(repo, "pergunta claude", agent=Agent())
     doc = parse_doc(open(result.draft_path, encoding="utf-8").read(), result.draft_path)
     assert doc.front["summary"] == "Curta e direta."
+
+
+def test_terminal_output_uses_paths_relative_to_acervo(repo, monkeypatch, capsys):
+    _fake_agent(monkeypatch, json.dumps({
+        "short": f"Curta [{repo.root}/knowledge/{CITE_FILE}#Procedimento].",
+        "long": f"Longa [{repo.root}/knowledge/{CITE_FILE}#Procedimento].",
+    }))
+    assert main(["--root", repo.root, "ask", "split DNS WireGuard"]) == 0
+    out = capsys.readouterr().out
+    assert f"[knowledge/{CITE_FILE}#Procedimento]" in out and repo.root not in out
+    assert main(["--root", repo.root, "--json", "ask", "split DNS WireGuard"]) == 0
+    assert repo.root in json.loads(capsys.readouterr().out)["short"]

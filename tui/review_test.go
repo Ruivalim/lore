@@ -54,7 +54,7 @@ func TestStatusFilterCycles(t *testing.T) {
 	if got := ids(); len(got) != 1 || got[0] != "rasc" {
 		t.Fatalf("rascunhos: %v", got)
 	}
-	if !strings.Contains(plain(m.listStatus()), "1 rascunhos") {
+	if !strings.Contains(plain(m.listStatus()), "1 rascunho") || strings.Contains(plain(m.listStatus()), "1 rascunhos") {
 		t.Fatalf("status: %q", plain(m.listStatus()))
 	}
 	m, _ = press(t, m, "v")

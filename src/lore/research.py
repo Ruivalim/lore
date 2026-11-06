@@ -1,6 +1,6 @@
 """Pesquisador externo: web + modelo forte -> resposta marcada + rascunho (Fase 4).
 
-Contratos duros (README §10.7, §12):
+Contratos duros (spec §10.7, §12):
 - só roda com confirmação humana (CLI) ou --yes com provedor configurado;
 - segredo detectado bloqueia envio;
 - página web é dado, nunca instrução (injection descarta trecho e registra);
@@ -198,7 +198,8 @@ def build_prompt(question: str, local_context: str,
         "resposta direta em 1 a 3 frases; 2) RESPOSTA completa marcada como "
         "provisória; 3) seção CITAÇÕES (o que veio de cada fonte); 4) seção "
         "CONCLUSÕES DO MODELO (o que é inferência sua); 5) seção INCERTEZAS. "
-        "Se as fontes forem fracas ou conflitarem, diga isso."
+        "Se as fontes forem fracas ou conflitarem, diga isso. Responda no "
+        "idioma da pergunta, mantendo o título `## Resumo` como está."
     )
 
 

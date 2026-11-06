@@ -1,4 +1,4 @@
-module github.com/ruivalim/lore/tui
+module github.com/Ruivalim/lore/tui
 
 go 1.27.1
 

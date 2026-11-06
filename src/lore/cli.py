@@ -1,4 +1,4 @@
-"""CLI lore: argparse, stdlib only (PLAN.md §0)."""
+"""CLI lore: argparse, stdlib only (plan §0)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from . import gitops
 from . import repo as repo_mod
 from .models import TYPES, parse_doc
 
-TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "templates")
+TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
 
 def _auto_commit(repo: repo_mod.Repo, action: str, subject: str) -> None:
@@ -315,7 +315,8 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
         "research": None,
     }
     if not args.json:
-        sys.stdout.write(_short_or_full(answer.short, answer.text, args.full))
+        sys.stdout.write(_relative(repo, _short_or_full(answer.short, answer.text,
+                                                       args.full)))
     if (
         answer.coverage in ("insufficient", "partial")
         and not args.local_only
@@ -335,6 +336,11 @@ def cmd_ask(args, repo: repo_mod.Repo) -> int:
 
 
 FULL_HINT = "(resposta completa: lore ask --full)"
+
+
+def _relative(repo: repo_mod.Repo, text: str) -> str:
+    """Caminhos do acervo relativos à raiz, só para leitura no terminal."""
+    return text.replace(os.path.join(repo.root, ""), "")
 
 
 def _short_or_full(short: str, full: str, want_full: bool) -> str:
@@ -734,9 +740,12 @@ def build_parser() -> argparse.ArgumentParser:
     common_sub = argparse.ArgumentParser(add_help=False)
     common_sub.add_argument("--root", default=argparse.SUPPRESS)
     common_sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    from . import __version__
+
     parser = argparse.ArgumentParser(
         prog="lore", description="Biblioteca pessoal curada", parents=[common]
     )
+    parser.add_argument("--version", action="version", version=f"lore {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
     _orig_add = sub.add_parser
     sub.add_parser = lambda *a, **k: _orig_add(*a, parents=[common_sub], **k)

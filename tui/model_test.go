@@ -473,3 +473,58 @@ func TestDocViewShowsSummary(t *testing.T) {
 		t.Fatalf("leitor sem o summary:\n%s", plain(m.View()))
 	}
 }
+
+func TestAnswerCitationsAreRelativeToRoot(t *testing.T) {
+	f := &fakeLore{local: AskResult{Coverage: "sufficient",
+		Short: "use x [/repo/knowledge/a.md#Passos]", Text: "completa [/repo/knowledge/a.md#Passos]"}}
+	m := ask(t, newTestModel(f), "q")
+	view := plain(m.View())
+	if !strings.Contains(view, "[knowledge/a.md#Passos]") || strings.Contains(view, "/repo/knowledge") {
+		t.Fatalf("citação não ficou relativa:\n%s", view)
+	}
+}
+
+func TestTildifyAndPlural(t *testing.T) {
+	t.Setenv("HOME", "/home/ana")
+	cases := map[string]string{"/home/ana/notes": "~/notes", "/home/ana": "~",
+		"/home/anabela/x": "/home/anabela/x", "/srv/notes": "/srv/notes"}
+	for in, want := range cases {
+		if got := tildify(in); got != want {
+			t.Errorf("tildify(%q) = %q, queria %q", in, got, want)
+		}
+	}
+	if plural(1, "rascunho", "rascunhos") != "1 rascunho" || plural(0, "doc", "docs") != "0 docs" {
+		t.Error("plural errado")
+	}
+}
+
+func TestEscapeTildesOnlyOutsideCode(t *testing.T) {
+	cases := map[string]string{
+		"refresh ~/.ssh/rc and set X=~/.ssh/a.": "refresh &#126;/.ssh/rc and set X=&#126;/.ssh/a.",
+		"use `ls ~/x` here (~/y),":              "use `ls ~/x` here (&#126;/y),",
+		"```sh\nls ~/x\n```\n~/y":               "```sh\nls ~/x\n```\n&#126;/y",
+		"~~~\nls ~/x\n~~~":                      "~~~\nls ~/x\n~~~",
+		"sem til aqui":                          "sem til aqui",
+	}
+	for in, want := range cases {
+		if got := escapeTildes(in); got != want {
+			t.Errorf("escapeTildes(%q) = %q, queria %q", in, got, want)
+		}
+	}
+}
+
+func TestAnswerWithHomePathsIsNotStruckThrough(t *testing.T) {
+	f := &fakeLore{local: AskResult{Coverage: "sufficient",
+		Text: "keep a symlink in ~/.ssh/rc and set SSH_AUTH_SOCK=~/.ssh/agent.sock"}}
+	m := ask(t, newTestModel(f), "q")
+	raw := m.View()
+	if strings.Contains(raw, "\x1b[9m") {
+		t.Fatal("texto saiu tachado")
+	}
+	if !strings.Contains(plain(raw), "~/.ssh/rc") || !strings.Contains(plain(raw), "=~/.ssh/agent.sock") {
+		t.Fatalf("til sumiu:\n%s", plain(raw))
+	}
+	if strings.Contains(plain(raw), "&#126;") {
+		t.Fatal("entidade apareceu na tela")
+	}
+}

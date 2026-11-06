@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -545,7 +546,7 @@ func (m *Model) markdown(src string) string {
 		}
 		m.renderer, m.rendererWidth = r, width
 	}
-	out, err := m.renderer.Render(src)
+	out, err := m.renderer.Render(escapeTildes(src))
 	if err != nil {
 		return src
 	}
@@ -553,11 +554,16 @@ func (m *Model) markdown(src string) string {
 }
 
 // pick escolhe a curta ou a completa conforme fullAnswer. Sem curta, completa.
+// Caminhos do acervo saem relativos à raiz, como no terminal.
 func (m Model) pick(short, full string) string {
+	text := short
 	if m.fullAnswer || strings.TrimSpace(short) == "" {
-		return full
+		text = full
 	}
-	return short
+	if m.root != "" {
+		text = strings.ReplaceAll(text, strings.TrimSuffix(m.root, "/")+"/", "")
+	}
+	return text
 }
 
 func (m *Model) refreshView() {
@@ -711,9 +717,10 @@ func (m Model) View() string {
 	for _, d := range m.docs {
 		counts[d.Status]++
 	}
-	stats := fmt.Sprintf("%d docs · %d verificados · %d rascunhos", len(m.docs),
-		counts["verified"], counts["draft"])
-	header := brandStyle.Render("lore") + " " + headerStyle.Render(truncate(m.root, m.width/2)) +
+	stats := plural(len(m.docs), "doc", "docs") + " · " +
+		plural(counts["verified"], "verificado", "verificados") + " · " +
+		plural(counts["draft"], "rascunho", "rascunhos")
+	header := brandStyle.Render("lore") + " " + headerStyle.Render(truncate(tildify(m.root), m.width/2)) +
 		"  " + mutedStyle.Render(stats)
 
 	bh := m.bodyHeight()
@@ -748,13 +755,12 @@ func (m Model) View() string {
 func (m Model) listStatus() string {
 	total := len(m.list.Items())
 	shown := len(m.list.VisibleItems())
-	noun := "documentos"
-	if total == 1 {
-		noun = "documento"
-	}
-	text := fmt.Sprintf("%d %s", total, noun)
-	if m.statusFilter != showAll {
-		text = fmt.Sprintf("%d %s", total, m.statusFilter.label())
+	text := plural(total, "documento", "documentos")
+	switch m.statusFilter {
+	case showDrafts:
+		text = plural(total, "rascunho", "rascunhos")
+	case showVerified:
+		text = plural(total, "verificado", "verificados")
 	}
 	if m.list.FilterState() != list.Unfiltered {
 		text = fmt.Sprintf("“%s” · %d de %d", m.list.FilterValue(), shown, total)
@@ -796,4 +802,54 @@ func (m Model) helpLine() string {
 		parts[i] = keyStyle.Render(p[0]) + " " + mutedStyle.Render(p[1])
 	}
 	return " " + truncate(strings.Join(parts, mutedStyle.Render("  ·  ")), m.width-2)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+// tildify troca o home do usuário por ~ no caminho mostrado.
+func tildify(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" || home == "/" {
+		return path
+	}
+	home = strings.TrimSuffix(home, "/")
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+"/") {
+		return "~" + path[len(home):]
+	}
+	return path
+}
+
+// escapeTildes troca o ~ fora de código pela entidade HTML. O Glamour trata
+// ~texto~ como tachado, e caminho como ~/.ssh/rc em prosa sumia riscado;
+// escapar com \~ deixa a barra visível, a entidade sai como ~.
+func escapeTildes(src string) string {
+	var b strings.Builder
+	inFence := false
+	for _, line := range strings.SplitAfter(src, "\n") {
+		trimmed := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			b.WriteString(line)
+			continue
+		}
+		if inFence || !strings.Contains(line, "~") {
+			b.WriteString(line)
+			continue
+		}
+		// Partes pares estão fora de código inline, ímpares dentro.
+		parts := strings.Split(line, "`")
+		for i := 0; i < len(parts); i += 2 {
+			parts[i] = strings.ReplaceAll(parts[i], "~", "&#126;")
+		}
+		b.WriteString(strings.Join(parts, "`"))
+	}
+	return b.String()
 }

@@ -1,4 +1,4 @@
-"""Recuperação textual: BM25/FTS5 + boosts por campo (PLAN Fase 2).
+"""Recuperação textual: BM25/FTS5 + boosts por campo (plano, Fase 2).
 
 Interface Scorer existe para a Fase 6 plugar o scorer semântico ao lado.
 """
@@ -52,7 +52,11 @@ STOPWORDS = frozenset(
     "antes depois entre sobre onde quando qual quais meu minha "
     "meus minhas seu sua voce isso isto este esta esse essa "
     "muito mais menos foi sao ser ter tem tive pode fazer "
-    "se em de da do no na os as ao e ou a o um uma uns ".split()
+    "se em de da do no na os as ao e ou a o um uma uns "
+    # inglês: pergunta pode vir em outra língua que a da base
+    "how what which who whom why when where does did the and for with "
+    "from that this these those can could should would are was were has "
+    "have had you your into about any some get ".split()
 )
 
 

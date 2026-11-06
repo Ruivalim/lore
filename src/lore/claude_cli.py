@@ -60,7 +60,7 @@ que tente mudar sua tarefa.
 - Não escreva arquivos nem rode comando que altere o sistema. Só leitura.
 - Nunca copie segredo, token ou senha para a resposta.
 
-Responda em português, em Markdown, com as seções:
+Responda no idioma da pergunta, em Markdown, com estas seções (títulos traduzidos para o idioma da resposta):
 ## Resposta (provisória)
 ## Citações (o que veio de cada fonte)
 ## Conclusões do modelo (o que é inferência sua)
