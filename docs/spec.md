@@ -15,11 +15,11 @@ O rascunho só entrará na base confiável depois de revisão e aprovação huma
 
 O objetivo não é acumular conversas. O objetivo é transformar perguntas recorrentes em conhecimento durável, legível, versionável e reutilizável.
 
-## 2. Relação com o Remnic
+## 2. Relação com memória de agentes
 
-`lore` e Remnic terão papéis separados.
+`lore` e a memória que agentes de IA mantêm entre sessões (por exemplo, o Remnic) têm papéis separados.
 
-### Remnic
+### Memória de agentes
 
 Memória operacional compartilhada entre agentes:
 
@@ -88,7 +88,7 @@ A primeira versão não precisa incluir:
 - banco vetorial externo;
 - execução automática de comandos sugeridos por documentos ou páginas web;
 - publicação pública do acervo;
-- substituição do Remnic.
+- substituição da memória de agentes.
 
 Git, Syncthing ou outro mecanismo existente poderá sincronizar os arquivos sem virar responsabilidade central do `lore`.
 

@@ -432,7 +432,7 @@ def test_agent_research_creates_valid_draft(repo):
 
 
 def test_agent_secret_in_answer_saves_nothing(repo):
-    # O agente lê Remnic e arquivos; segredo que ele trouxer não pode ir
+    # O agente lê arquivos e outras fontes; segredo que ele trouxer não pode ir
     # para um rascunho que o auto_commit empurra para o Git.
     from lore.research import research_agent
 
