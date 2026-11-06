@@ -723,12 +723,49 @@ def cmd_init(args) -> int:
     message = f"acervo criado em {root}"
     if result["git_initialized"]:
         message += " (git init)"
+    if not args.no_seed:
+        from . import seed as seed_mod
+
+        try:
+            seeded = seed_mod.install(repo_mod.Repo(root), args.lang)
+        except (ValueError, OSError) as exc:
+            return _err(f"acervo criado, mas as sementes falharam: {exc}", args.json)
+        result["seed"] = seeded
+        message += (f"\n{len(seeded)} documentos sobre o próprio Lore em "
+                    f"{seed_mod.TARGET}/ (tire com --no-seed)")
     if config_mod.global_repository_root() != root:
         message += (
             "\npara usar fora dele, aponte repository.root para este caminho em "
             f"{config_mod.global_config_path()}"
         )
     _out({"ok": True, "message": message, **result}, args.json)
+    return 0
+
+
+SEED_LABELS = {
+    "added": "adicionado",
+    "updated": "atualizado",
+    "unchanged": "sem mudança",
+    "modified": "pulado, você editou (--force sobrescreve)",
+    "removed": "pulado, você apagou (--force reinstala)",
+    "elsewhere": "pulado, o id existe em outro lugar",
+}
+
+
+def cmd_seed(args, repo: repo_mod.Repo) -> int:
+    from . import seed as seed_mod
+
+    try:
+        results = seed_mod.install(repo, args.lang or "", force=args.force)
+    except (ValueError, OSError) as exc:
+        return _err(str(exc), args.json)
+    _auto_commit(repo, "seed", f"documentos do Lore ({seed_mod.installed_lang(repo.root)})")
+    if args.json:
+        _out({"ok": True, "lang": seed_mod.installed_lang(repo.root),
+              "results": results}, True)
+        return 0
+    for item in results:
+        print(f"{item['id']}: {SEED_LABELS[item['action']]}")
     return 0
 
 
@@ -753,6 +790,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_init = sub.add_parser("init", help="criar um acervo novo")
     p_init.add_argument("caminho", nargs="?", default=".")
     p_init.add_argument("--no-git", action="store_true", help="não roda git init")
+    p_init.add_argument("--no-seed", action="store_true",
+                        help="não instala os documentos sobre o próprio Lore")
+    p_init.add_argument("--lang", default="", choices=["", "pt", "en"],
+                        help="língua dos documentos sobre o Lore (padrão pt)")
+
+    p_seed = sub.add_parser("seed", help="instalar ou atualizar os documentos sobre o Lore")
+    p_seed.add_argument("--lang", default="", choices=["", "pt", "en"],
+                        help="padrão: a já instalada, senão pt")
+    p_seed.add_argument("--force", action="store_true",
+                        help="sobrescreve o que você editou e reinstala o que apagou")
+    p_seed.set_defaults(func=cmd_seed)
     p_init.set_defaults(func=cmd_init, needs_repo=False)
 
     p_new = sub.add_parser("new", help="criar rascunho a partir de template")

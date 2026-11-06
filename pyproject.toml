@@ -43,7 +43,7 @@ where = ["src"]
 version = { attr = "lore.__version__" }
 
 [tool.setuptools.package-data]
-lore = ["config.example.toml", "templates/*.md"]
+lore = ["config.example.toml", "templates/*.md", "seed/*/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

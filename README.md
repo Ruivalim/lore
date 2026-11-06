@@ -50,7 +50,7 @@ make tui-install   # lore-tui into ~/.local/bin
 ## Quick start
 
 ```sh
-lore init ~/notes                 # new knowledge base, with git init
+lore init ~/notes --lang en       # new knowledge base, with git init
 lore config --global --init       # then set repository.root: ~/notes
 lore new --type howto --title "Rotate SSH keys"
 lore edit rotate-ssh-keys         # fill in the template in $EDITOR
@@ -59,6 +59,12 @@ lore approve rotate-ssh-keys --human
 lore ask "how do I rotate ssh keys"
 lore ask                          # no question opens the TUI
 ```
+
+A new base is not empty: `lore init` adds a few verified documents about lore
+itself under `knowledge/lore/`, so `lore ask "how do I approve a draft"` works
+on day one. Pick the language with `--lang pt|en`, skip them with `--no-seed`,
+and run `lore seed` after upgrading lore to refresh them. Documents you edited
+or deleted are left alone.
 
 Try it without writing anything first, using the bundled example base:
 
@@ -78,7 +84,8 @@ commits. [knowledge/git-recent-commit-subjects.md#Procedure]
 
 | Command | What it does |
 | --- | --- |
-| `lore init [path]` | Create a knowledge base (`knowledge/`, `drafts/`, `archive/`, `.lore/`) |
+| `lore init [path]` | Create a knowledge base (`knowledge/`, `drafts/`, `archive/`, `.lore/`) with the lore docs |
+| `lore seed` | Install or refresh the documents about lore itself, keeping your edits |
 | `lore ask [question]` | Answer from the base; no question opens the TUI. `--full`, `--extractive`, `--local-only`, `--yes` |
 | `lore search <terms>` | Ranked passages, filter with `--type` and `--tag` |
 | `lore import <file>` | Bring in any Markdown; an agent suggests title, type, tags and summary |

@@ -49,6 +49,8 @@ lore/
 │   ├── importer.py      # import com metadados do agente
 │   ├── gitops.py        # auto-commit e lock
 │   ├── redact.py        # detecção de segredos
+│   ├── seed.py          # documentos sobre o próprio Lore
+│   ├── seed/            # sementes em pt e en
 │   └── templates/       # 1 modelo por tipo
 ├── tests/
 └── tui/                 # lore-tui em Go (Bubble Tea)
@@ -276,6 +278,7 @@ atualização curta deste plano se algo desviou (motivo registrado).
 - Config global em `~/.config/lore/config.yaml` define `repository.root` e o agente padrão; raiz resolve por `--root`, ancestral do diretório atual e então config global. TOML do acervo sobrescreve opções operacionais, nunca a raiz.
 - Resposta curta por padrão e completa com `--full`; documentos ganham `summary` opcional, gerado no import e na pesquisa.
 - `[review]` permite aprovação automática por origem; aprovado sem revisão fica `reviewed_by: auto` até confirmação humana.
+- Acervo novo nasce com documentos sobre o próprio Lore (`src/lore/seed/<pt|en>/`, instalados em `knowledge/lore/`). `lore seed` atualiza só o que o usuário não editou nem apagou, pelo hash em `.lore/seed.json`. Teste impede semente de citar comando, flag ou chave que não existe.
 - Fallback externo respeita `require_confirmation = false`, funciona em `--json`, envia trechos locais na cobertura parcial e cria IDs exclusivos para pesquisas repetidas.
 - O ciclo CLI completo de pesquisa, draft, aprovação humana e reutilização local vive em `tests/integration/test_learning_cycle.py`.
 - `make install` usa pipx em modo editável para expor `lore` no PATH do usuário.
