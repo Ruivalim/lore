@@ -25,6 +25,7 @@ sources:
 
 How do I approve a draft? How do I reject a draft? Where do I see what needs
 review? Can drafts be approved automatically? What is `reviewed_by: auto`?
+How do I reactivate an outdated (stale) document?
 
 ## Procedure
 
@@ -44,8 +45,10 @@ In the TUI, `v` filters drafts, `A` approves (asks to confirm), `R` rejects
 A `draft` becomes `verified` or `archived`. A `verified` document can become
 `stale` (`lore stale <id> --human`), which still answers but with a warning,
 and `verified` or `stale` documents can be archived
-(`lore archive <id> --human`). Past its `review_after` date, a document shows
-up in the queue as overdue.
+(`lore archive <id> --human`). Reviewed a `stale` document and it still
+holds? `lore approve <id> --human` makes it `verified` again and moves
+`review_after` forward by the same interval as before. Past its
+`review_after` date, a document shows up in the queue as overdue.
 
 ## Automatic approval
 

@@ -749,6 +749,8 @@ SEED_LABELS = {
     "modified": "pulado, você editou (--force sobrescreve)",
     "removed": "pulado, você apagou (--force reinstala)",
     "elsewhere": "pulado, o id existe em outro lugar",
+    "replaced": "removido, trocado pela outra língua",
+    "kept": "mantido na língua anterior, você editou",
 }
 
 

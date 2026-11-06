@@ -117,7 +117,7 @@ func TestApproveOnlyDrafts(t *testing.T) {
 	m, cmd := press(t, m, "j")
 	m = drain(t, m, cmd, 0)
 	m, _ = press(t, m, "A")
-	if m.reviewMode != reviewNone || !strings.Contains(m.notice, "só rascunho") {
+	if m.reviewMode != reviewNone || !strings.Contains(m.notice, "só rascunho ou stale") {
 		t.Fatalf("modo %v notice %q", m.reviewMode, m.notice)
 	}
 	m, _ = press(t, m, "R")
@@ -215,5 +215,25 @@ func TestAutoApprovedCanBeConfirmedWithA(t *testing.T) {
 	m, _ = press(t, m, "esc", "R")
 	if m.reviewMode != reviewNone {
 		t.Fatal("R abriu motivo num verificado")
+	}
+}
+
+func TestStaleCanBeReactivatedWithA(t *testing.T) {
+	f := reviewFixture()
+	f.docs = append(f.docs, Doc{ID: "velho", Title: "Velho", Status: "stale", Path: "knowledge/velho.md"})
+	m := loaded(t, f)
+	m, cmd := press(t, m, "j", "j")
+	m = drain(t, m, cmd, 0)
+	if !strings.Contains(plain(m.View()), "reativar") {
+		t.Fatalf("help sem reativar:\n%s", plain(m.View()))
+	}
+	m, _ = press(t, m, "A")
+	if m.reviewMode != reviewConfirmApprove || !strings.Contains(plain(m.View()), "Volta a responder como verificado") {
+		t.Fatalf("A não pediu confirmação de reativar: modo %v", m.reviewMode)
+	}
+	next, cmd := m.Update(key("enter"))
+	drain(t, next.(Model), cmd, 0)
+	if len(f.approved) != 1 || f.approved[0] != "velho" {
+		t.Fatalf("aprovados %v", f.approved)
 	}
 }

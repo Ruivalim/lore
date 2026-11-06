@@ -24,7 +24,8 @@ sources:
 ## Perguntas que este documento responde
 
 Como aprovo um rascunho? Como rejeito um rascunho? Onde vejo o que falta
-revisar? Dá para aprovar automaticamente? O que é `reviewed_by: auto`?
+revisar? Dá para aprovar automaticamente? O que é `reviewed_by: auto`? Como
+reativo um documento desatualizado (stale)?
 
 ## Procedimento
 
@@ -43,7 +44,9 @@ No TUI, `v` filtra os rascunhos, `A` aprova (pede confirmação), `R` rejeita
 
 `draft` vira `verified` ou `archived`. Um `verified` pode virar `stale`
 (`lore stale <id> --human`), que ainda responde mas com aviso, e `verified` ou
-`stale` podem ir para `archived` (`lore archive <id> --human`). Passou do
+`stale` podem ir para `archived` (`lore archive <id> --human`). Revisou um
+`stale` e ele continua valendo? `lore approve <id> --human` reativa como
+`verified` e empurra o `review_after` pelo mesmo intervalo de antes. Passou do
 `review_after`, o documento aparece na fila como vencido.
 
 ## Aprovação automática

@@ -38,7 +38,7 @@ pelo TUI? Como cancelo a pesquisa?
 | `d` | alterna entre a resposta e o documento |
 | `f` | alterna entre a resposta curta e a completa |
 | `p` | pesquisa externamente a última pergunta |
-| `A` | aprova o rascunho, ou confirma um aprovado sem revisão |
+| `A` | aprova o rascunho, confirma um aprovado sem revisão ou reativa um stale |
 | `R` | rejeita o rascunho, pedindo o motivo |
 | `e` | edita no `$EDITOR` |
 | `r` | recarrega a lista |

@@ -224,3 +224,62 @@ def test_doctor_flags_invalid_review_policy(repo, capsys):
     assert main(["--root", repo.root, "--json", "doctor"]) == 1
     problems = json.loads(capsys.readouterr().out)["problems"]
     assert any("review.research inválido" in p for p in problems)
+
+
+# --- reativar stale -----------------------------------------------------------
+
+def _stale_doc(repo, verified_at="2026-01-01", review_after="2026-04-01",
+               doc_id="velho-stale"):
+    text = (
+        f"---\nid: {doc_id}\ntitle: Velho\ntype: howto\nstatus: stale\n"
+        "reviewed_by: auto\ntags:\n  - x\ncreated_at: 2026-01-01\n"
+        f"updated_at: 2026-01-01\nverified_at: {verified_at}\n"
+        + (f"review_after: {review_after}\n" if review_after else "")
+        + "sources:\n  - kind: personal\n    description: x\n---\n\n# Velho\n\nTexto.\n")
+    path = os.path.join(repo.root, "knowledge", f"{doc_id}.md")
+    with open(path, "w", encoding="utf-8") as h:
+        h.write(text)
+    return path
+
+
+def test_human_reverifies_stale_in_place_and_shifts_review_after(repo, monkeypatch):
+    monkeypatch.setattr(review_mod, "_today", lambda: "2026-11-05")
+    path = _stale_doc(repo)
+    assert review_mod.approve(repo, "velho-stale", human=True) == path
+    doc = repo_mod.find_by_id(repo, "velho-stale")
+    assert doc.status == "verified" and doc.path == path
+    assert doc.front["verified_at"] == "2026-11-05"
+    assert doc.front["reviewed_by"] == "human"
+    assert doc.front["review_after"] == "2027-02-03"  # mesmos 90 dias, a partir de hoje
+    assert "velho-stale" not in {item[0] for item in review_mod.queue(repo)}
+
+
+@pytest.mark.parametrize("verified_at, review_after, expected", [
+    ("2026-01-01", "2027-01-01", "2027-01-01"),   # ainda no futuro: não mexe
+    ("2026-01-01", None, None),                   # sem review_after: não inventa
+    ("2026-05-01", "2026-04-01", "2026-04-01"),   # intervalo negativo: não repete
+])
+def test_reverify_review_after_edge_cases(repo, monkeypatch, verified_at,
+                                          review_after, expected):
+    monkeypatch.setattr(review_mod, "_today", lambda: "2026-11-05")
+    _stale_doc(repo, verified_at, review_after)
+    review_mod.approve(repo, "velho-stale", human=True)
+    assert repo_mod.find_by_id(repo, "velho-stale").front.get("review_after") == expected
+
+
+def test_stale_is_never_reactivated_without_human(repo):
+    _stale_doc(repo)
+    with pytest.raises(ValueError, match="--human"):
+        review_mod.approve(repo, "velho-stale", policy="auto")
+    assert repo_mod.find_by_id(repo, "velho-stale").status == "stale"
+
+
+def test_cli_approve_stale_and_archived_still_refused(repo, capsys):
+    _stale_doc(repo)
+    assert main(["--root", repo.root, "approve", "velho-stale"]) == 1
+    assert "--human" in capsys.readouterr().err
+    assert main(["--root", repo.root, "approve", "velho-stale", "--human"]) == 0
+    capsys.readouterr()
+    review_mod.archive(repo, "velho-stale", human=True)
+    assert main(["--root", repo.root, "approve", "velho-stale", "--human"]) == 1
+    assert "draft ou stale" in capsys.readouterr().err

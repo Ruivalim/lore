@@ -26,3 +26,24 @@ jobs:
           cache-dependency-path: tui/go.sum
       # O mesmo alvo que roda local: lint (ruff, go vet, gofmt), testes e build.
       - run: make check
+
+  install:
+    # O install.sh de verdade, num runner limpo: instala, cria acervo, pergunta.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: tui/go.mod
+          cache-dependency-path: tui/go.sum
+      - run: ./install.sh
+      - run: |
+          lore --version
+          test -x ~/.local/bin/lore-tui
+          lore init "$RUNNER_TEMP/notes" --lang en
+          lore --root "$RUNNER_TEMP/notes" ask "how do I approve a draft" --extractive \
+            | grep -q "lore approve"
+      - run: ./install.sh --uninstall && ! command -v lore

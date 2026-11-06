@@ -53,7 +53,7 @@ def test_both_languages_cover_the_same_topics_with_distinct_ids():
     pt = [doc_id for doc_id, _, _ in seed_mod.shipped("pt")]
     en = [doc_id for doc_id, _, _ in seed_mod.shipped("en")]
     assert len(pt) == len(en)
-    assert not set(pt) & set(en)  # as duas podem conviver no mesmo acervo
+    assert not set(pt) & set(en)  # editada na troca de língua convive com a outra
 
 
 def _parser_surface():
@@ -251,3 +251,69 @@ def test_natural_questions_find_the_right_seed(acervo, lang):
         answer = ask(acervo, question, extractive=True, local_only=True)
         assert answer.citations, question
         assert expected in answer.citations[0], (question, answer.citations)
+
+
+
+# --- troca de língua ----------------------------------------------------------
+
+def _seed_files(acervo):
+    return sorted(os.listdir(os.path.join(acervo.root, seed_mod.TARGET)))
+
+
+def test_switching_language_replaces_untouched_seeds(acervo):
+    seed_mod.install(acervo, "pt")
+    results = seed_mod.install(acervo, "en")
+    actions = [item["action"] for item in results]
+    assert actions.count("replaced") == len(seed_mod.shipped("pt"))
+    assert actions.count("added") == len(seed_mod.shipped("en"))
+    assert _seed_files(acervo) == sorted(name for _, name, _ in seed_mod.shipped("en"))
+    assert seed_mod.installed_lang(acervo.root) == "en"
+    # e volta
+    seed_mod.install(acervo, "pt")
+    assert _seed_files(acervo) == sorted(name for _, name, _ in seed_mod.shipped("pt"))
+
+
+def test_switching_language_keeps_edited_seed_and_stops_managing_it(acervo):
+    seed_mod.install(acervo, "pt")
+    doc_id, name, text = seed_mod.shipped("pt")[0]
+    path = os.path.join(acervo.root, seed_mod.TARGET, name)
+    open(path, "w", encoding="utf-8").write(text + "\nNota minha.\n")
+
+    results = {item["id"]: item["action"] for item in seed_mod.install(acervo, "en")
+               if item["action"] in ("kept", "replaced")}
+    assert results[doc_id] == "kept"
+    assert os.path.exists(path)
+    # Ficou sendo documento seu: voltar para pt não o trata como semente editada.
+    back = {item["id"]: item["action"] for item in seed_mod.install(acervo, "pt")}
+    assert back[doc_id] == "modified"
+    assert "Nota minha." in open(path, encoding="utf-8").read()
+
+
+def test_switch_answers_in_new_language_only(acervo):
+    seed_mod.install(acervo, "pt")
+    seed_mod.install(acervo, "en")
+    answer = ask(acervo, "how do I approve a draft", extractive=True, local_only=True)
+    assert "lore-reviewing-drafts" in answer.citations[0]
+    assert repo_mod.find_by_id(acervo, "lore-revisar-rascunhos") is None
+
+
+def test_language_switch_commit_records_removals(acervo):
+    def git(*args):
+        return subprocess.run(["git", "-C", acervo.root, *args], capture_output=True,
+                              text=True, check=True).stdout
+
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    config = os.path.join(acervo.root, ".lore", "config.toml")
+    text = open(config, encoding="utf-8").read()
+    open(config, "w", encoding="utf-8").write(text.replace("auto_commit = false",
+                                                           "auto_commit = true"))
+    assert main(["--root", acervo.root, "seed", "--lang", "pt"]) == 0
+    assert main(["--root", acervo.root, "seed", "--lang", "en"]) == 0
+    status = git("show", "--name-status", "--format=", "HEAD").split("\n")
+    deleted = [line for line in status if line.startswith("D\t")]
+    added = [line for line in status if line.startswith("A\t")]
+    assert len(deleted) == len(seed_mod.shipped("pt"))
+    assert len(added) == len(seed_mod.shipped("en"))
+    assert git("status", "--porcelain", "--", "knowledge/lore") == ""

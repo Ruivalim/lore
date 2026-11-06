@@ -63,6 +63,31 @@ def _save_state(root: str, state: dict) -> None:
         handle.write("\n")
 
 
+def _drop_language(repo: repo_mod.Repo, state: dict, lang: str,
+                   results: list[dict]) -> bool:
+    """Tira as sementes intocadas da língua anterior, para não duplicar o
+    mesmo assunto em duas línguas. Editada fica, e deixa de ser semente."""
+    from . import gitops
+
+    removed = False
+    for doc_id, name, _ in shipped(lang):
+        dest = os.path.join(repo.root, TARGET, name)
+        rel = os.path.relpath(dest, repo.root)
+        recorded = state["files"].pop(rel, None)
+        if not os.path.exists(dest):
+            continue
+        with open(dest, encoding="utf-8") as handle:
+            current = _hash(handle.read())
+        if recorded is not None and current == recorded:
+            os.remove(dest)
+            gitops.touch(dest)
+            removed = True
+            results.append({"id": doc_id, "action": "replaced", "path": dest})
+        else:
+            results.append({"id": doc_id, "action": "kept", "path": dest})
+    return removed
+
+
 def installed_lang(root: str) -> str:
     return str(_load_state(root).get("lang") or "")
 
@@ -72,14 +97,18 @@ def install(repo: repo_mod.Repo, lang: str = "", force: bool = False) -> list[di
 
     Ações: added, updated, unchanged, modified (pulado, você editou),
     removed (pulado, você apagou), elsewhere (pulado, o id existe fora de
-    knowledge/lore/).
+    knowledge/lore/). Trocando de língua, as da língua anterior saem
+    (replaced) ou ficam por terem sido editadas (kept).
     """
     state = _load_state(repo.root)
-    lang = lang or state.get("lang") or DEFAULT_LANG
+    previous = str(state.get("lang") or "")
+    lang = lang or previous or DEFAULT_LANG
     docs = shipped(lang)
     target_dir = os.path.join(repo.root, TARGET)
     results = []
     changed = False
+    if previous and previous != lang and previous in LANGS:
+        changed = _drop_language(repo, state, previous, results)
     for doc_id, name, text in docs:
         dest = os.path.join(target_dir, name)
         rel = os.path.relpath(dest, repo.root)

@@ -155,8 +155,8 @@ func (m Model) handleReviewKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		if !ok {
 			return m, nil, true
 		}
-		if doc.Status != "draft" && !doc.NeedsConfirmation() {
-			m.notice = "só rascunho pode ser aprovado (este é " + doc.Status + ")"
+		if doc.Status != "draft" && doc.Status != "stale" && !doc.NeedsConfirmation() {
+			m.notice = "só rascunho ou stale pode ser aprovado (este é " + doc.Status + ")"
 			return m, nil, true
 		}
 		m.reviewMode = reviewConfirmApprove
@@ -289,6 +289,9 @@ func (m Model) reviewBanner(width int) string {
 		question := "Aprovar “" + truncate(doc.Title, width/2) + "”? Vira verificado e passa a responder perguntas.  "
 		if doc.NeedsConfirmation() {
 			question = "Confirmar a revisão de “" + truncate(doc.Title, width/2) + "”? Entrou sem revisão humana.  "
+		}
+		if doc.Status == "stale" {
+			question = "Reativar “" + truncate(doc.Title, width/2) + "”? Volta a responder como verificado.  "
 		}
 		return bannerStyle.BorderForeground(colGreen).Width(width).Render(
 			question +

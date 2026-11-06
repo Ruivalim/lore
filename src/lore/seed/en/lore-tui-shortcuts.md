@@ -38,7 +38,7 @@ approve from the TUI? How do I cancel research?
 | `d` | switches between the answer and the document |
 | `f` | switches between the short and the full answer |
 | `p` | researches the last question externally |
-| `A` | approves the draft, or confirms an auto-approved one |
+| `A` | approves a draft, confirms an auto-approved one or reactivates a stale one |
 | `R` | rejects the draft, asking for the reason |
 | `e` | edits in `$EDITOR` |
 | `r` | reloads the list |

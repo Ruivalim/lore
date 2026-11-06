@@ -6,6 +6,7 @@ Thanks for taking the time. A few things keep lore easy to change.
 
 ```sh
 make setup   # .venv with lore editable and dev tools
+make install # lore on your PATH, editable, via pipx
 make check   # what CI runs: ruff, go vet, gofmt, pytest, go test, builds
 ```
 

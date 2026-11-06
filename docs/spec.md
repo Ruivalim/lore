@@ -211,7 +211,7 @@ stale -> archived
 verified -> archived
 ```
 
-Por padrão nenhuma transição para `verified` ocorre por decisão de um modelo. O dono do acervo pode ligar aprovação automática por origem em `[review]` (`auto-if-clean` ou `auto`); o que entra assim fica marcado `reviewed_by: auto` e segue na fila de revisão até um humano confirmar.
+`lore approve <id> --human` cobre `draft -> verified` e `stale -> verified`; o segundo nunca é automático. Por padrão nenhuma transição para `verified` ocorre por decisão de um modelo. O dono do acervo pode ligar aprovação automática por origem em `[review]` (`auto-if-clean` ou `auto`); o que entra assim fica marcado `reviewed_by: auto` e segue na fila de revisão até um humano confirmar.
 
 ## 8. Formato dos documentos
 

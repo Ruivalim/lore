@@ -42,10 +42,13 @@ durable, readable, versioned notes.
 Requires Python 3.11+ and, for the TUI, Go.
 
 ```sh
-git clone https://github.com/Ruivalim/lore && cd lore
-make install       # lore on your PATH via pipx (editable)
-make tui-install   # lore-tui into ~/.local/bin
+curl -fsSL https://raw.githubusercontent.com/Ruivalim/lore/main/install.sh | bash
 ```
+
+It uses pipx, or uv, or a venv of its own, builds the TUI when Go is around,
+and `install.sh --uninstall` removes both. Your knowledge bases and config are
+never touched. From a clone, `./install.sh` does the same; `make install` is the
+editable install for working on lore itself.
 
 ## Quick start
 
@@ -91,7 +94,7 @@ commits. [knowledge/git-recent-commit-subjects.md#Procedure]
 | `lore import <file>` | Bring in any Markdown; an agent suggests title, type, tags and summary |
 | `lore new`, `lore add` | Draft from a template, or add a file that already has front matter |
 | `lore review [id]` | Review queue, or one draft with unsourced claims and possible conflicts |
-| `lore approve`, `reject`, `archive`, `stale` | State changes, all require `--human` |
+| `lore approve`, `reject`, `archive`, `stale` | State changes, all require `--human`; `approve` also reactivates a stale document |
 | `lore doctor [--probe]` | Check documents, links, config keys and agents; `--probe` calls each agent |
 | `lore list`, `show`, `edit`, `reindex`, `config` | The rest |
 
@@ -105,8 +108,8 @@ with a filter, the reader or the answer on the right, and a question box.
 ![lore TUI reviewing a draft](docs/img/tui-review.png)
 
 `a` asks, `f` switches between the short and the full answer, `v` cycles
-between all documents, drafts and verified ones, and on a draft `A` approves
-and `R` rejects with a reason. Before research starts there is a short
+between all documents, drafts and verified ones, `A` approves a draft or
+reactivates a stale document, and `R` rejects a draft with a reason. Before research starts there is a short
 countdown you can cancel with `esc`.
 
 ## Agents

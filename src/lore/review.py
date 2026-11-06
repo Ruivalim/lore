@@ -138,7 +138,9 @@ def approve(repo: repo_mod.Repo, doc_id: str, human: bool = False,
             policy: str = "") -> str:
     """Promove draft a verified e reindexa. Exige human=True ou política auto.
 
-    Em verified que entrou sem revisão, human=True só confirma a revisão.
+    Em verified que entrou sem revisão, human=True só confirma a revisão. Em
+    stale, human=True reativa: a política automática nunca decide se algo
+    desatualizado voltou a valer.
     """
     doc = repo_mod.find_by_id(repo, doc_id)
     if doc is None:
@@ -154,8 +156,10 @@ def approve(repo: repo_mod.Repo, doc_id: str, human: bool = False,
         gitops.touch(doc.path)
         index_mod.build(repo)
         return doc.path
+    if doc.status == "stale":
+        return _reverify(repo, doc, human)
     if doc.status != "draft":
-        raise ValueError(f"só draft pode ser aprovado (atual: {doc.status})")
+        raise ValueError(f"só draft ou stale pode ser aprovado (atual: {doc.status})")
     errors = transition(doc, "verified", human=human, policy=policy)
     if errors:
         raise ValueError("; ".join(errors))
@@ -167,6 +171,43 @@ def approve(repo: repo_mod.Repo, doc_id: str, human: bool = False,
     dest = _move(doc.path, repo.managed_dir(repo_mod.KNOWLEDGE))
     index_mod.build(repo)
     return dest
+
+
+def _next_review(front: dict, today: str) -> str | None:
+    """review_after depois de reverificar: mesmo intervalo de antes, a partir
+    de hoje. None quando não há intervalo para repetir ou ele ainda vale."""
+    review_after = front.get("review_after")
+    verified_at = front.get("verified_at")
+    if not isinstance(review_after, str) or review_after > today:
+        return None
+    try:
+        start = datetime.date.fromisoformat(str(verified_at))
+        end = datetime.date.fromisoformat(review_after)
+    except ValueError:
+        return None
+    interval = end - start
+    if interval.days <= 0:
+        return None
+    return (datetime.date.fromisoformat(today) + interval).isoformat()
+
+
+def _reverify(repo: repo_mod.Repo, doc, human: bool) -> str:
+    if not human:
+        raise ValueError("reativar stale exige aprovação humana (--human)")
+    errors = transition(doc, "verified", human=True)
+    if errors:
+        raise ValueError("; ".join(errors))
+    today = _today()
+    next_review = _next_review(doc.front, today)
+    if next_review:
+        doc.front["review_after"] = next_review
+    doc.front["verified_at"] = today
+    doc.front["updated_at"] = today
+    doc.front["reviewed_by"] = "human"
+    _rewrite(doc, repo)
+    gitops.touch(doc.path)
+    index_mod.build(repo)
+    return doc.path
 
 
 def policy_for(cfg: dict, source: str) -> str:
