@@ -1,4 +1,4 @@
-"""Fila de revisão e promoção de rascunhos (PLAN Fase 5, README §6.4).
+"""Fila de revisão e promoção de rascunhos (plano, Fase 5, spec §6.4).
 
 Nenhuma promoção a verified sem human=True, a não ser que o usuário tenha
 ligado uma política automática em [review]. O que entra assim fica marcado

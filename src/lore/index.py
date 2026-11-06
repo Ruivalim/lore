@@ -1,4 +1,4 @@
-"""Indexador local: Markdown -> chunks por seção -> SQLite FTS5 (PLAN Fase 2).
+"""Indexador local: Markdown -> chunks por seção -> SQLite FTS5 (plano, Fase 2).
 
 Descartável e reconstruível. Só entram docs verified/stale como fonte
 confiável; draft/archived nunca respondem, então nem indexam.

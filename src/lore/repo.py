@@ -1,4 +1,4 @@
-"""Operações sobre o repositório Markdown: fonte canônica (README §10.2)."""
+"""Operações sobre o repositório Markdown: fonte canônica (spec §10.2)."""
 
 from __future__ import annotations
 

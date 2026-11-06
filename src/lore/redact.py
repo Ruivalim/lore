@@ -1,4 +1,4 @@
-"""Redação de segredos antes de envio remoto (README §12.2).
+"""Redação de segredos antes de envio remoto (spec §12.2).
 
 recall > precisão: dúvida bloqueia o envio e pede decisão humana.
 """

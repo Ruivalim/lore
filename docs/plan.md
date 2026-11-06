@@ -1,7 +1,6 @@
 # lore: plano de implementação
 
-Decisões de stack fechadas com o Rui em 2026-09-22. Spec em `README.md`.
-Nenhum código escrito antes do aceite deste plano (README §22).
+Decisões de stack fechadas em 2026-09-22. Spec em `docs/spec.md`.
 
 ## 0. Decisões de stack (§21 da spec, resolvidas)
 
@@ -10,12 +9,12 @@ Nenhum código escrito antes do aceite deste plano (README §22).
 | Linguagem | Python >= 3.11 | Stdlib cobre sqlite3+FTS5, argparse, tomllib. Deps pequenas, testes locais simples. |
 | Biblioteca de CLI | argparse (stdlib) | Superfície pequena (12 comandos). Zero dependência, sem lockfile na Fase 1. |
 | Representação de embeddings | Nenhuma até a Fase 6 | Retrieval terá interface (`Scorer`) onde o lexical é um scorer. Semântico entra como segundo scorer, aditivo. |
-| Backend de texto | CLI do Pi em modo print, sem sessão nem ferramentas; modelo padrão do Pi, com override por provider/model | Reusa login e providers configurados no Pi. Sem CLI/modelo disponível, resposta extrativa permanece. |
+| Backend de texto | Agente por tarefa (`[llm]`): presets Pi, Claude Code, Codex, agy, OpenAI-compatível, ou CLI próprio, sempre sem ferramentas nem sessão | Reusa logins e providers que o usuário já tem. Sem agente disponível, resposta extrativa permanece. |
 | Provedores remotos iniciais | Nenhum fixo; interface + config, implementação na Fase 4 | Evita amarrar acervo a fornecedor. |
 | Busca web | Interface `WebSearch` + provedor configurável, Fase 4 | Mesmo motivo acima. |
-| Fusão e reordenação | Fase 2: FTS5 + boosts por campo. Fusão híbrida só na Fase 6 | Calibrar com consultas reais antes de fundir (README §10.4). |
+| Fusão e reordenação | Fase 2: FTS5 + boosts por campo. Fusão híbrida só na Fase 6 | Calibrar com consultas reais antes de fundir (spec §10.4). |
 | Saída estruturada | `--json` com esquema estável por comando | Contrato testável desde a Fase 1. |
-| Commits automáticos | Desligado por padrão, sempre explícito | README §17. Política `auto_commit = false` fixa na v1. |
+| Commits automáticos | Desligado por padrão, `[git] auto_commit` liga | spec §17. Commit dos arquivos tocados e push se houver upstream; nunca pull nem force. |
 
 Dependências externas na v1: nenhuma obrigatória. `pytest` só para dev.
 Empacotamento: `pyproject.toml` com PEP 517 simples (`[build-system]` setuptools),
@@ -26,32 +25,36 @@ reavaliar se entrar dependência runtime.
 
 ```text
 lore/
-├── README.md            # spec (fonte do produto)
-├── PLAN.md              # este arquivo
+├── README.md
+├── LICENSE
 ├── pyproject.toml
-├── src/
-│   └── lore/
-│       ├── __init__.py
-│       ├── cli.py       # argparse, 12 comandos (§13)
-│       ├── config.py    # carrega .lore/config.toml + env, valida
-│       ├── models.py    # Doc, front matter, validação, transições de estado
-│       ├── repo.py      # operações sobre Markdown (ler, criar, mover, escrita atômica)
-│       ├── index.py     # FTS5: chunking por seção, indexação, rebuild
-│       ├── retrieve.py  # busca textual + filtros + interface Scorer
-│       ├── answer.py    # avaliador de cobertura + compositor extrativo (Fase 3)
-│       ├── research.py  # pesquisador externo (Fase 4)
-│       ├── review.py    # fila de revisão e promoção (Fase 5)
-│       └── redact.py    # detecção e redação de segredos (§12.2)
+├── Makefile             # make help lista os alvos
+├── docs/                # spec, plano, calibração
+├── examples/acervo/     # acervo de exemplo para testar sem base própria
+├── scripts/lore-sync.sh # pull --rebase + reindex + push, sob o lock do auto-commit
+├── src/lore/
+│   ├── cli.py           # argparse, todos os comandos
+│   ├── config.py        # YAML global + TOML do acervo, defaults do exemplo
+│   ├── config.example.toml
+│   ├── agents.py        # agentes de texto (presets e CLI próprio)
+│   ├── models.py        # front matter, validação, transições
+│   ├── repo.py          # Markdown: ler, criar, mover, escrita atômica, init
+│   ├── index.py         # FTS5: chunking por seção, indexação, rebuild
+│   ├── retrieve.py      # busca textual, híbrida e interface Scorer
+│   ├── semantic.py      # embeddings (hash local ou endpoint)
+│   ├── answer.py        # cobertura, extrativo, síntese curta e completa
+│   ├── research.py      # pesquisa web ou por agente, rascunho
+│   ├── claude_cli.py    # Claude Code headless como pesquisador
+│   ├── review.py        # fila, aprovação humana e política automática
+│   ├── importer.py      # import com metadados do agente
+│   ├── gitops.py        # auto-commit e lock
+│   ├── redact.py        # detecção de segredos
+│   └── templates/       # 1 modelo por tipo
 ├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── fixtures/        # corpus pequeno de docs + perguntas com docs esperados (§18.4)
-├── knowledge/           # 5 categorias iniciais (§9), cada uma com .gitkeep
-├── drafts/
-├── archive/
-├── templates/           # 1 modelo por tipo (§4), espelhando campos do §8
-└── .lore/               # config.toml + index.sqlite (ignorado pelo git)
+└── tui/                 # lore-tui em Go (Bubble Tea)
 ```
+
+O acervo (`knowledge/`, `drafts/`, `archive/`, `.lore/`) mora em repositório próprio, criado com `lore init`.
 
 ## 2. Fases
 
@@ -109,7 +112,7 @@ Arquivos: `index.py`, `retrieve.py`, `cli.py` (`search`, `reindex`).
 
 Concluída quando: importar, indexar, achar funciona; `reindex` após `rm .lore/index.sqlite`
 restaura; avaliação de recuperação roda em `pytest` e passa; latência p50 local < 200ms
-no corpus de fixture (máquina do Rui, número registrado no teste como referência,
+no corpus de fixture (máquina de desenvolvimento, número registrado no teste como referência,
 não como teto rígido).
 
 ### Fase 3: consulta fundamentada (`ask` extrativo + síntese local opcional)
@@ -154,7 +157,7 @@ Arquivos: `research.py`, `redact.py`, `cli.py` (fallback do `ask`).
 - Gate de confirmação: `partial`/`insufficient` sugere pesquisa, pede `[S/n]`
   salvo `--yes` com política ok. Antes de qualquer envio: mostra o que vai
   (pergunta + chunks listados), roda `redact.py`; segredo detectado bloqueia
-  e pede decisão humana (README §12.2, §15).
+  e pede decisão humana (spec §12.2, §15).
 - `redact.py`: regex para tokens/chaves/senhas/cookies/URLs com credencial +
   lista configurável `privacy.extra_patterns`. recall > precisão: dúvida bloqueia.
 - Ordem de fontes do §10.6; cada fonte registra URL, título, `accessed_at`.
@@ -213,36 +216,9 @@ SQLite, tabela separada, igualmente descartável), doc de calibração.
 Concluída quando: relatório de calibração escrito; semântica desligável;
 nenhuma regressão na avaliação textual pura.
 
-## 3. Configuração (` .lore/config.toml`, criado por `lore config --init`)
+## 3. Configuração
 
-```toml
-[repository]
-knowledge_dir = "knowledge"
-drafts_dir = "drafts"
-archive_dir = "archive"
-
-[retrieval]
-lexical = true
-semantic = false        # Fase 6
-# embedding_model = ""  # Fase 6
-
-[answer]
-mode = "local-first"
-backend = "pi-cli"  # pi-cli ou openai-compatible; usa modelo padrão do Pi
-# local_model_endpoint = ""  # compatibilidade; usado no backend openai-compatible
-allow_extractive_fallback = true
-
-[research]
-enabled = false         # Fase 4 liga o fluxo; provedor continua configurável
-require_confirmation = true
-# provider = ""
-# web_search = ""
-
-[privacy]
-redact_secrets = true
-send_full_documents = false
-auto_commit = false     # sempre explícito na v1
-```
+`src/lore/config.example.toml` tem todas as opções com o valor padrão; é a fonte dos defaults e o template de `lore init`. O YAML global (`~/.config/lore/config.yaml`) aceita as mesmas chaves e é lido antes; o TOML do acervo ganha, menos `repository.root`.
 
 ## 4. Testes por nível (resumo do §18)
 
@@ -254,7 +230,7 @@ auto_commit = false     # sempre explícito na v1
   cobertura, citação, incerteza, sem alegação solta, comando exato); autoridade
   final humana, sem LLM-juiz na v1.
 
-## 5. Critérios de aceite da v1 (README §20, sem corte)
+## 5. Critérios de aceite da v1 (spec §20, sem corte)
 
 Os 10 itens do ciclo + 5 obrigatórios valem integralmente. Demonstração por
 script `tests/integration/test_learning_cycle.py` que executa os 10 passos em
@@ -270,7 +246,7 @@ repo temporário. Falha em qualquer item reprova a release.
 6. Fase 6 -> `v0.1.0` com relatório de calibração.
 
 Cada fase termina com: testes verdes, `lore doctor` limpo no próprio repo,
-atualização curta do PLAN.md se algo desviou (motivo registrado).
+atualização curta deste plano se algo desviou (motivo registrado).
 
 ## 7. Riscos e rollback
 
@@ -295,9 +271,11 @@ atualização curta do PLAN.md se algo desviou (motivo registrado).
 - Calibração Fase 6: backend hash com ganho zero, semântica off por padrão
   (ver `docs/CALIBRATION.md`).
 - Revisão de completude: `lore edit <id>` expõe no CLI o fluxo `$EDITOR` que já existia no módulo de revisão.
-- Geração de texto usa Pi CLI (`--print`) sem sessão, ferramentas ou contexto de projeto; embeddings continuam no endpoint configurado.
-- `lore import` usa Pi só para metadados; corpo fica preservado e novo arquivo sempre nasce draft. Origem local é registrada como `sources.kind: local`.
-- Config global em `~/.config/lore/config.yaml` define `repository.root`, `pi.binary` e `pi.model`; raiz resolve por `--root`, ancestral do diretório atual e então config global. TOML do repo sobrescreve opções operacionais, nunca a raiz.
+- Geração de texto passa pelo agente da tarefa (`[llm.answer]`, `[llm.import]`, `[llm.research]`), sem sessão, ferramentas ou contexto de projeto; embeddings continuam no endpoint configurado.
+- `lore import` usa o agente só para metadados e resumo; corpo fica preservado e o arquivo nasce draft, salvo política em `[review] import`. Origem local é registrada como `sources.kind: local`.
+- Config global em `~/.config/lore/config.yaml` define `repository.root` e o agente padrão; raiz resolve por `--root`, ancestral do diretório atual e então config global. TOML do acervo sobrescreve opções operacionais, nunca a raiz.
+- Resposta curta por padrão e completa com `--full`; documentos ganham `summary` opcional, gerado no import e na pesquisa.
+- `[review]` permite aprovação automática por origem; aprovado sem revisão fica `reviewed_by: auto` até confirmação humana.
 - Fallback externo respeita `require_confirmation = false`, funciona em `--json`, envia trechos locais na cobertura parcial e cria IDs exclusivos para pesquisas repetidas.
 - O ciclo CLI completo de pesquisa, draft, aprovação humana e reutilização local vive em `tests/integration/test_learning_cycle.py`.
 - `make install` usa pipx em modo editável para expor `lore` no PATH do usuário.

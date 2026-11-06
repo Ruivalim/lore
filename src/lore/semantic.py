@@ -1,4 +1,4 @@
-"""Busca semântica opcional (PLAN Fase 6). Desligada por padrão.
+"""Busca semântica opcional (plano, Fase 6). Desligada por padrão.
 
 Backends de embedding (interface Embedder):
 - HashEmbedder: trigramas de chars com hashing, stdlib, determinístico.

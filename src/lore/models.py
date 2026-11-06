@@ -1,4 +1,4 @@
-"""Esquema de documentos lore: validação e estados (README §7, §8)."""
+"""Esquema de documentos lore: validação e estados (spec §7, §8)."""
 
 from __future__ import annotations
 
